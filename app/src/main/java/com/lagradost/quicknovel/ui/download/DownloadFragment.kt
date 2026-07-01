@@ -33,6 +33,9 @@ import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.ui.img
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
+import com.lagradost.quicknovel.util.UIHelper.getShowCovers
+import com.lagradost.quicknovel.util.UIHelper.setShowCovers
+import androidx.preference.PreferenceManager
 import kotlinx.coroutines.launch
 
 class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
@@ -131,6 +134,7 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
     lateinit var searchExitIcon: ImageView
     lateinit var searchMagIcon: ImageView
 
+    @SuppressLint("NotifyDataSetChanged")
     override fun onBindingCreated(binding: FragmentDownloadsBinding) {
         viewModel.loadAllData(true)
         // activity?.fixPaddingStatusbar(binding.downloadToolbar)
@@ -155,6 +159,27 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
                 return true
             }
         })
+
+        // App-wide "show book covers" toggle, next to the library search bar.
+        fun updateCoverToggleIcon() {
+            val shown = getShowCovers(binding.downloadCoverToggle.context)
+            binding.downloadCoverToggle.setImageResource(
+                if (shown) R.drawable.ic_baseline_image_24 else R.drawable.ic_baseline_hide_image_24
+            )
+            binding.downloadCoverToggle.contentDescription =
+                getString(if (shown) R.string.hide_covers else R.string.show_covers)
+        }
+        updateCoverToggleIcon()
+        binding.downloadCoverToggle.setOnClickListener { view ->
+            val ctx = view.context
+            val newValue = !getShowCovers(ctx)
+            PreferenceManager.getDefaultSharedPreferences(ctx).edit()
+                .putBoolean(getString(R.string.show_covers_key), newValue).apply()
+            setShowCovers(newValue)
+            updateCoverToggleIcon()
+            // rebind visible library cards so the change is immediate
+            (binding.viewpager.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()
+        }
 
 
         val adapter = ViewpagerAdapter(viewModel, this) { isScrollingDown ->

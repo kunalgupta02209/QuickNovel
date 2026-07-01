@@ -49,6 +49,7 @@ import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.QuickBook
 import com.lagradost.quicknovel.ui.UiImage
 import com.lagradost.quicknovel.R
+import androidx.preference.PreferenceManager
 import com.lagradost.quicknovel.databinding.ImageLayoutBinding
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.ui.UiText
@@ -78,6 +79,23 @@ fun Long.divCeil(other: Long): Long {
 }
 
 object UIHelper {
+    // App-wide "show book covers" toggle. Cached so we don't hit SharedPreferences on every bind
+    // during scroll; kept in sync by setShowCovers when the user flips the toggle.
+    @Volatile
+    private var showCoversCache: Boolean? = null
+
+    /** Whether book covers should be displayed anywhere in the app (default true). */
+    fun getShowCovers(context: Context): Boolean {
+        return showCoversCache ?: PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean(context.getString(R.string.show_covers_key), true)
+            .also { showCoversCache = it }
+    }
+
+    /** Update the cached toggle value (caller is responsible for persisting to preferences). */
+    fun setShowCovers(value: Boolean) {
+        showCoversCache = value
+    }
+
     fun String?.html(): Spanned {
         return getHtmlText(this?.trim()?.replace("\n", "<br>") ?: return "".toSpanned())
     }
@@ -255,6 +273,13 @@ object UIHelper {
     ): Boolean {
         if (this == null || uiImage == null) {
             this?.dispose()
+            return false
+        }
+        // App-wide "hide book covers" toggle: treat a remote/bitmap cover as if it were absent
+        // (same path as a book with no poster, which every layout already handles). Drawable
+        // resources (placeholders / icons) are still allowed through.
+        if (uiImage !is UiImage.Drawable && !getShowCovers(this.context)) {
+            this.dispose()
             return false
         }
         val transformations = if (radius > 0) listOf(
