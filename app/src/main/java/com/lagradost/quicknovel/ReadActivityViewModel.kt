@@ -47,9 +47,11 @@ import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.TTSHelper.parseTextToSpans
 import com.lagradost.quicknovel.TTSHelper.preParseHtml
 import com.lagradost.quicknovel.TTSHelper.ttsParseText
+import android.os.Build
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.letInner
 import com.lagradost.quicknovel.tts.ModelDownloadManager
+import com.lagradost.quicknovel.tts.OnDeviceTtsEngine
 import com.lagradost.quicknovel.tts.TtsEngine
 import com.lagradost.quicknovel.ui.TtsEngineType
 import com.lagradost.quicknovel.mvvm.logError
@@ -1357,7 +1359,17 @@ class ReadActivityViewModel : ViewModel() {
 
     private fun initTTSSession(context: Context) {
         runOnMainThread {
-            ttsSession = TTSSession(context, ::parseAction)
+            val useOnDevice = ttsEngineType == TtsEngineType.ON_DEVICE &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                    modelDownloads(context).isReady(ttsOnDeviceModel)
+            ttsSession = if (useOnDevice) {
+                OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ::parseAction).also {
+                    it.onAudibleLine = { line -> _ttsLine.postValue(line) }
+                }
+            } else {
+                if (ttsEngineType == TtsEngineType.ON_DEVICE) showToast(R.string.tts_model_not_downloaded)
+                TTSSession(context, ::parseAction)
+            }
         }
     }
 
@@ -1563,8 +1575,8 @@ class ReadActivityViewModel : ViewModel() {
                         }
 
 
-                        // post visual
-                        _ttsLine.postValue(line)
+                        // post visual (on-device engines post the audible line themselves, audio-synced)
+                        if (ttsSession.drivesOwnHighlight != true) _ttsLine.postValue(line)
 
                         // update the media notification with the current + upcoming line text
                         // (metadata-only on 13+ so the system media UI animates the change itself)
@@ -1576,9 +1588,16 @@ class ReadActivityViewModel : ViewModel() {
                         )
 
                         // wait for next line
+                        // Feed a look-ahead window so an on-device engine can pre-render ahead
+                        // (Strategy B). The system engine only uses the first entry, unchanged.
+                        val upcoming = run {
+                            val end = minOf(lines.size, ttsInnerIndex + 1 + ttsLookahead)
+                            if (ttsInnerIndex + 1 < end) lines.subList(ttsInnerIndex + 1, end).toList()
+                            else emptyList()
+                        }
                         val waitFor = ttsSession.speak(
                             line,
-                            listOfNotNull(nextLine)
+                            upcoming
                         ) {
                             currentTTSStatus != TTSHelper.TTSStatus.IsRunning || pendingTTSSkip != 0
                         }

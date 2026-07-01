@@ -1,0 +1,303 @@
+package com.lagradost.quicknovel.tts
+
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import com.k2fsa.sherpa.onnx.OfflineTts
+import com.lagradost.quicknovel.TTSHelper
+import com.lagradost.quicknovel.mvvm.logError
+import kotlinx.coroutines.delay
+
+/**
+ * On-device neural TTS engine (embedded sherpa-onnx `OfflineTts`).
+ *
+ * The model is non-streaming per sentence (it fully synthesizes a sentence before any audio), so to
+ * get gapless playback we decouple synthesis from playback with a producer/consumer over a
+ * never-stopped [AudioTrack] (MODE_STREAM, PCM_FLOAT):
+ *
+ *  - a **producer** thread renders the next few sentences (the look-ahead window) into memory while
+ *    the current one plays;
+ *  - a **consumer** thread writes rendered PCM back-to-back into the track — consecutive writes into
+ *    a never-stopped stream track are gapless.
+ *
+ * The reader loop ([com.lagradost.quicknovel.ReadActivityViewModel.startTTSThread]) drives this
+ * through the same [TtsEngine] contract as the system engine: [speak] enqueues `line` + its
+ * `upcoming` window and returns a monotonic id; [waitForOr] blocks until that id has been played.
+ * Skip/pause arrive as [interruptTTS] (flush) + a re-`speak`, exactly like the system path.
+ */
+class OnDeviceTtsEngine(
+    context: Context,
+    modelId: String,
+    voiceId: String,
+    lookahead: Int,
+    @Suppress("unused") private val event: (TTSHelper.TTSActionType) -> Boolean,
+) : TtsEngine {
+    private val appContext = context.applicationContext
+    private val def = TtsModels.byId(modelId)
+    private val sid: Int = (TtsModels.parseVoice(voiceId)?.second ?: 0)
+        .coerceIn(0, (def.speakerCount - 1).coerceAtLeast(0))
+
+    @Volatile private var lookahead: Int = lookahead.coerceIn(1, MAX_LOOKAHEAD)
+    @Volatile private var speed: Float = 1.0f
+
+    /** Posted (from the audio thread) when a sentence actually starts playing → drives the highlight. */
+    var onAudibleLine: ((TTSHelper.TTSLine) -> Unit)? = null
+
+    override val supportsPitch: Boolean get() = false
+    override val supportsSystemLanguagePicker: Boolean get() = false
+    override val drivesOwnHighlight: Boolean get() = true
+
+    @Volatile private var tts: OfflineTts? = null
+    @Volatile private var track: AudioTrack? = null
+    private var sampleRate = 24000
+
+    private class Slot(val id: Int, val line: TTSHelper.TTSLine) {
+        @Volatile var pcm: FloatArray? = null
+        @Volatile var rendered = false
+        @Volatile var failed = false
+        @Volatile var cancelled = false
+    }
+
+    // All slot/cursor mutation is guarded by [lock]; lock.wait/notify coordinates producer+consumer.
+    private val lock = Object()
+    private val slots = ArrayList<Slot>()
+    private var playIndex = 0            // consumer-owned; the slot currently playing
+    private var nextId = 1
+    @Volatile private var endId = 0      // highest id that has finished playing
+    @Volatile private var running = false
+    private var producer: Thread? = null
+    private var consumer: Thread? = null
+
+    override fun isValidTTS(): Boolean = tts != null && track != null
+    override fun ttsInitialized(): Boolean = tts != null
+
+    override fun register() {
+        if (running) return
+        // Build the model (heavy int8 ONNX load) — register() runs on the reader's IO coroutine.
+        val config = TtsModels.resolveConfig(appContext, def)
+        if (config != null) {
+            tts = try {
+                OfflineTts(assetManager = null, config = config)
+            } catch (t: Throwable) {
+                logError(t); null
+            }
+        }
+        sampleRate = tts?.sampleRate() ?: 24000
+
+        val minBuf = AudioTrack.getMinBufferSize(
+            sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
+        ).coerceAtLeast(4096)
+        // ~0.25 s of headroom (float mono: sampleRate*4 bytes = 1 s) so a flush() on skip re-primes fast.
+        val bufBytes = maxOf(minBuf, sampleRate)
+        track = try {
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufBytes)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+                .also { applySpeed(it); it.play() }
+        } catch (t: Throwable) {
+            logError(t); null
+        }
+
+        running = true
+        consumer = Thread({ consumeLoop() }, "tts-audio").apply { isDaemon = true; start() }
+        producer = Thread({ produceLoop() }, "tts-synth").apply { isDaemon = true; start() }
+    }
+
+    override fun unregister() { /* focus/noisy handling added in a later phase */ }
+
+    override fun release() {
+        running = false
+        synchronized(lock) {
+            slots.forEach { it.cancelled = true }
+            slots.clear(); playIndex = 0
+            lock.notifyAll()
+        }
+        producer?.interrupt(); consumer?.interrupt()
+        producer = null; consumer = null
+        track?.let { t -> runCatching { t.pause() }; runCatching { t.flush() }; runCatching { t.stop() }; runCatching { t.release() } }
+        track = null
+        tts?.let { runCatching { it.release() } }
+        tts = null
+    }
+
+    override fun setSpeed(speed: Float) {
+        this.speed = if (speed > 0f) speed else 1.0f
+        track?.let { applySpeed(it) }
+    }
+
+    override fun setPitch(pitch: Float) { /* neural models have no pitch control */ }
+
+    private fun applySpeed(t: AudioTrack) {
+        runCatching {
+            val p = t.playbackParams
+            p.speed = speed.coerceIn(0.25f, 4.0f)
+            t.playbackParams = p
+        }
+    }
+
+    override suspend fun speak(
+        line: TTSHelper.TTSLine,
+        upcoming: List<TTSHelper.TTSLine>,
+        action: () -> Boolean,
+    ): Int? {
+        if (tts == null) return null
+        synchronized(lock) {
+            var idx = slots.indexOfFirst { it.line == line && !it.cancelled }
+            if (idx == -1) {
+                // Discontinuity (fresh start or skip target): rebuild the timeline from this line.
+                slots.forEach { it.cancelled = true }
+                slots.clear()
+                playIndex = 0
+                slots.add(Slot(nextId++, line))
+                idx = 0
+                flushTrack()
+            }
+            // Append the look-ahead window right after the current line (dedup by identity).
+            var insertAt = idx + 1
+            for (u in upcoming.take(lookahead)) {
+                if (slots.none { it.line == u && !it.cancelled }) {
+                    slots.add(insertAt.coerceAtMost(slots.size), Slot(nextId++, u))
+                    insertAt++
+                }
+            }
+            lock.notifyAll()
+            return slots[idx].id
+        }
+    }
+
+    override suspend fun waitForOr(id: Int?, action: () -> Boolean, then: () -> Unit) {
+        if (id == null) return
+        while (id > endId) {
+            delay(50)
+            if (action()) {
+                interruptTTS()
+                then()
+                break
+            }
+        }
+    }
+
+    override fun interruptTTS() {
+        synchronized(lock) {
+            slots.forEach { it.cancelled = true }
+            slots.clear()
+            playIndex = 0
+            lock.notifyAll()
+        }
+        flushTrack()
+    }
+
+    private fun flushTrack() {
+        track?.let { t -> runCatching { t.pause(); t.flush(); t.play() } }
+    }
+
+    // ---- producer: render the look-ahead window ahead of playback ----
+    private fun produceLoop() {
+        while (running) {
+            val slot: Slot? = synchronized(lock) {
+                val end = minOf(slots.size, playIndex + lookahead + 1)
+                var found: Slot? = null
+                for (i in playIndex until end) {
+                    val s = slots.getOrNull(i) ?: continue
+                    if (!s.rendered && !s.failed && !s.cancelled) { found = s; break }
+                }
+                if (found == null) runCatching { lock.wait(200) }
+                found
+            }
+            if (!running) break
+            if (slot != null) render(slot)
+        }
+    }
+
+    private fun render(slot: Slot) {
+        val engine = tts ?: run { slot.failed = true; return }
+        val chunks = ArrayList<FloatArray>()
+        var total = 0
+        val sink: (FloatArray) -> Int = cb@{ samples ->
+            if (!running || slot.cancelled) return@cb 0
+            val c = samples.copyOf() // native buffer is reused/aliased — copy it
+            chunks.add(c); total += c.size
+            1
+        }
+        try {
+            val gen = TtsModels.resolveGenerationConfig(appContext, def, sid, 1.0f)
+            if (gen != null) {
+                engine.generateWithConfigAndCallback(text = slot.line.speakOutMsg, config = gen, callback = sink)
+            } else {
+                // Keep model speed at 1.0 so cached PCM stays valid; user speed is applied on the track.
+                engine.generateWithCallback(text = slot.line.speakOutMsg, sid = sid, speed = 1.0f, callback = sink)
+            }
+        } catch (t: Throwable) {
+            logError(t); slot.failed = true
+            synchronized(lock) { lock.notifyAll() }
+            return
+        }
+        if (slot.cancelled) return
+        val out = FloatArray(total)
+        var o = 0
+        for (c in chunks) { System.arraycopy(c, 0, out, o, c.size); o += c.size }
+        synchronized(lock) {
+            slot.pcm = out
+            slot.rendered = true
+            lock.notifyAll()
+        }
+    }
+
+    // ---- consumer: play rendered slots back-to-back into the never-stopped track ----
+    private fun consumeLoop() {
+        while (running) {
+            val slot: Slot = synchronized(lock) {
+                while (running && playIndex >= slots.size) runCatching { lock.wait(200) }
+                if (!running) return
+                slots[playIndex]
+            }
+            synchronized(lock) {
+                while (running && !slot.rendered && !slot.failed && !slot.cancelled) runCatching { lock.wait(100) }
+            }
+            if (!running) return
+            val pcm = slot.pcm
+            if (!slot.cancelled && !slot.failed && pcm != null) {
+                onAudibleLine?.invoke(slot.line)
+                val t = track
+                var off = 0
+                while (running && !slot.cancelled && t != null && off < pcm.size) {
+                    val n = t.write(pcm, off, minOf(WRITE_CHUNK, pcm.size - off), AudioTrack.WRITE_BLOCKING)
+                    if (n <= 0) break
+                    off += n
+                }
+            }
+            endId = maxOf(endId, slot.id)
+            advance(slot)
+        }
+    }
+
+    private fun advance(slot: Slot) {
+        synchronized(lock) {
+            if (playIndex < slots.size && slots[playIndex] === slot) playIndex++
+            // Bound memory: keep at most BEHIND already-played slots for instant back-skip.
+            while (playIndex > BEHIND && slots.isNotEmpty()) { slots.removeAt(0); playIndex-- }
+            lock.notifyAll()
+        }
+    }
+
+    companion object {
+        private const val BEHIND = 2
+        private const val MAX_LOOKAHEAD = 6
+        private const val WRITE_CHUNK = 4096 // floats per AudioTrack.write
+    }
+}
