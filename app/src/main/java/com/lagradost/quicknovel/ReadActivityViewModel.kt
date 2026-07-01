@@ -446,11 +446,21 @@ data class LiveChapterData(
 
     val title: UiText,
     val rawText: String,
+    /** Plain-text chapter title, spoken by TTS before the chapter content. Blank/null = not spoken. */
+    val ttsTitle: String? = null,
     //val ttsLines: List<TTSHelper.TTSLine>
 ) {
     // tts lines are lazy because not everyone uses tts
     val ttsLines by lazy {
-        ttsParseText(rendered.substring(0, rendered.length), index)
+        val lines = ttsParseText(rendered.substring(0, rendered.length), index)
+        // Read the chapter title aloud before its content. Placed at char 0 so it is skipped
+        // automatically when resuming mid-chapter (the seek matches on startChar), and only ever
+        // spoken when a chapter is entered from the top.
+        val spokenTitle = ttsTitle?.trim()
+        if (!spokenTitle.isNullOrBlank()) {
+            lines.add(0, TTSHelper.TTSLine(spokenTitle, startChar = 0, endChar = 0, index = index))
+        }
+        lines
     }
 }
 
@@ -925,6 +935,7 @@ class ReadActivityViewModel : ViewModel() {
                     originalSpans = originalSpans,
                     rawText = rawText,
                     title = book.getChapterTitle(index),
+                    ttsTitle = book.getChapterTitle(index).asStringNull(context),
                 )
             }
 
@@ -1486,13 +1497,7 @@ class ReadActivityViewModel : ViewModel() {
                         }
 
                     fun notify() {
-                        TTSNotifications.notify(
-                            book.title(),
-                            chaptersTitlesInternal[index],
-                            book.poster(),
-                            currentTTSStatus,
-                            context
-                        )
+                        TTSNotifications.notify(currentTTSStatus, context)
                     }
                     notify()
 
@@ -1557,6 +1562,15 @@ class ReadActivityViewModel : ViewModel() {
                         // post visual
                         _ttsLine.postValue(line)
 
+                        // update the media notification with the current + upcoming line text
+                        // (metadata-only on 13+ so the system media UI animates the change itself)
+                        TTSNotifications.updateNowPlaying(
+                            line.speakOutMsg,
+                            nextLine?.speakOutMsg,
+                            currentTTSStatus,
+                            context
+                        )
+
                         // wait for next line
                         val waitFor = ttsSession.speak(
                             line,
@@ -1620,13 +1634,7 @@ class ReadActivityViewModel : ViewModel() {
             logError(t)
         } finally {
             currentTTSStatus = TTSHelper.TTSStatus.IsStopped
-            TTSNotifications.notify(
-                book.title(),
-                "".toUiText(),
-                book.poster(),
-                TTSHelper.TTSStatus.IsStopped,
-                context
-            )
+            TTSNotifications.notify(TTSHelper.TTSStatus.IsStopped, context)
             ttsSession.interruptTTS()
             ttsSession.unregister()
             _ttsLine.postValue(null)

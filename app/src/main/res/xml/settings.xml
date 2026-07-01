@@ -84,6 +84,12 @@
                 android:summary="@string/remove_bloat_desc"
                 app:defaultValue="true"
                 android:icon="@drawable/ic_baseline_edit_24" />
+        <SwitchPreference
+                app:key="@string/tts_show_cover_key"
+                android:title="@string/tts_show_cover"
+                android:summary="@string/tts_show_cover_desc"
+                app:defaultValue="true"
+                android:icon="@drawable/ic_baseline_volume_up_24" />
 
         <Preference
                 app:key="@string/theme_key"

@@ -9,7 +9,6 @@ import androidx.core.content.ContextCompat
 import androidx.media.session.MediaButtonReceiver
 import com.lagradost.quicknovel.CommonActivity.showToast
 import com.lagradost.quicknovel.mvvm.logError
-import com.lagradost.quicknovel.ui.txt
 import com.lagradost.quicknovel.util.AppUtils.isServiceRunning
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import kotlinx.coroutines.Job
@@ -63,7 +62,6 @@ class TTSNotificationService : Service() {
         if (viewModel == null) {
             startForeground(
                 TTSNotifications.TTS_NOTIFICATION_ID, TTSNotifications.createNotification(
-                    "Unknown", txt(""), null,
                     TTSHelper.TTSStatus.IsRunning, this
                 )
             )
@@ -74,9 +72,6 @@ class TTSNotificationService : Service() {
         TTSNotifications.setMediaSession(viewModel, viewModel.book, this)
 
         val notification = TTSNotifications.createNotification(
-            viewModel.book.title(),
-            txt(""),
-            viewModel.book.poster(),
             TTSHelper.TTSStatus.IsRunning,
             this
         )

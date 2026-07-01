@@ -18,14 +18,35 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.media.session.MediaButtonReceiver
+import androidx.preference.PreferenceManager
 import com.lagradost.quicknovel.mvvm.logError
-import com.lagradost.quicknovel.ui.UiText
 
 object TTSNotifications {
-    private const val TTS_CHANNEL_ID = "QuickNovelTTS"
+    // Bumped from the original "QuickNovelTTS" (IMPORTANCE_DEFAULT) so the new silent
+    // IMPORTANCE_LOW settings take effect on devices that already created the old channel.
+    private const val TTS_CHANNEL_ID = "QuickNovelTTSPlayback"
+    private const val TTS_CHANNEL_ID_LEGACY = "QuickNovelTTS"
     const val TTS_NOTIFICATION_ID = 133742
 
     private var hasCreateedNotificationChannel = false
+
+    // Current "now playing" info, kept so any re-render (line change, play/pause, chapter change)
+    // shows the same content. lineText = line currently read (title), upcomingText = next line (grey).
+    private var coverBitmap: Bitmap? = null // the novel cover, regardless of the toggle
+    private var poster: Bitmap? = null      // effective cover shown (null when the toggle is off)
+    private var bookTitle: String = ""
+    private var lineText: String = ""
+    private var upcomingText: String? = null
+
+    /** User setting: whether to show the novel cover in the read-aloud notification / media controls. */
+    private fun showCoverEnabled(context: Context): Boolean =
+        PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean(context.getString(R.string.tts_show_cover_key), true)
+
+    /** Recompute the effective [poster] from the setting so the toggle takes effect live. */
+    private fun refreshCover(context: Context?) {
+        poster = if (context != null && showCoverEnabled(context)) coverBitmap else null
+    }
 
     private fun createNotificationChannel(context: Context) {
         // Create the NotificationChannel, but only on API 26+ because
@@ -33,17 +54,23 @@ object TTSNotifications {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = context.getString(R.string.text_to_speech)
             val descriptionText = context.getString(R.string.text_to_speech_channel_description)
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            // LOW = ongoing playback notification with no sound/vibration on post.
+            val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(
                 TTS_CHANNEL_ID,
                 name,
                 importance
             ).apply {
                 description = descriptionText
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
             }
             // Register the channel with the system
             val notificationManager: NotificationManager =
                 context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Remove the old noisy channel so users stop hearing the start sound.
+            notificationManager.deleteNotificationChannel(TTS_CHANNEL_ID_LEGACY)
             notificationManager.createNotificationChannel(channel)
         }
     }
@@ -51,6 +78,12 @@ object TTSNotifications {
     var mediaSession: MediaSessionCompat? = null
 
     fun setMediaSession(viewModel: ReadActivityViewModel, book: AbstractBook, context: Context) {
+        coverBitmap = book.poster()
+        refreshCover(context)
+        bookTitle = book.title()
+        lineText = book.title() // seed until the first line is spoken
+        upcomingText = null
+
         val mbrIntent = MediaButtonReceiver.buildMediaButtonPendingIntent(
             context,
             PlaybackStateCompat.ACTION_PLAY_PAUSE
@@ -103,21 +136,91 @@ object TTSNotifications {
                 }
             )
 
-            val mediaMetadata = MediaMetadataCompat.Builder()
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1L).apply {
-                    // https://stackoverflow.com/questions/72750099/android-mediastyle-notification-image-largeicon-is-pixilated
-                    book.poster()?.let { icon ->
-                        putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, icon)
-                    }
-                    book.author()?.let { author ->
-                        putString(MediaMetadataCompat.METADATA_KEY_AUTHOR, author)
-                    }
-                }
-                .build()
-            setMetadata(mediaMetadata)
-            //setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
-            //isActive = true
+            // Required so the OS routes hardware / Bluetooth media buttons to this session and so
+            // the system media notification renders transport controls. Without an active session
+            // carrying a PlaybackState, button routing is unreliable and the controls don't show.
+            @Suppress("DEPRECATION")
+            setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            setPlaybackState(buildPlaybackState(TTSHelper.TTSStatus.IsRunning))
+            isActive = true
         }
+        applyMetadata()
+    }
+
+    /** The currently read line becomes the media title; the upcoming line the (greyed) subtitle. */
+    fun setNowPlaying(current: String, upcoming: String?) {
+        lineText = current
+        upcomingText = upcoming?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Update the now-playing line as smoothly as the platform allows.
+     *
+     * Notifications cannot be app-animated, but the Android 13+ system media UI reads its text live
+     * from the session metadata and applies its own fade when it changes. So on 13+ we update only
+     * the metadata (no full notification re-post → no flash, native transition). On older versions
+     * the text lives in the notification body, so we must re-post it (no animation is possible there).
+     */
+    fun updateNowPlaying(
+        current: String,
+        upcoming: String?,
+        status: TTSHelper.TTSStatus,
+        context: Context?
+    ) {
+        setNowPlaying(current, upcoming)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            refreshCover(context)
+            applyMetadata()
+        } else {
+            notify(status, context)
+        }
+    }
+
+    /**
+     * Push [lineText]/[upcomingText]/[poster] into the media session metadata. On Android 13+ the
+     * system media UI is built from this metadata (title bold, artist/subtitle greyed underneath).
+     */
+    private fun applyMetadata() {
+        val session = mediaSession ?: return
+        val title = lineText.ifBlank { bookTitle }
+        val builder = MediaMetadataCompat.Builder()
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1L)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, upcomingText ?: "")
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, upcomingText ?: "")
+        // https://stackoverflow.com/questions/72750099/android-mediastyle-notification-image-largeicon-is-pixilated
+        poster?.let { builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) }
+        session.setMetadata(builder.build())
+    }
+
+    /** Actions this session advertises + the play/pause/stop state derived from [status]. */
+    private fun buildPlaybackState(status: TTSHelper.TTSStatus): PlaybackStateCompat {
+        val (state, speed) = when (status) {
+            TTSHelper.TTSStatus.IsRunning -> PlaybackStateCompat.STATE_PLAYING to 1f
+            TTSHelper.TTSStatus.IsPaused -> PlaybackStateCompat.STATE_PAUSED to 0f
+            TTSHelper.TTSStatus.IsStopped -> PlaybackStateCompat.STATE_STOPPED to 0f
+        }
+        return PlaybackStateCompat.Builder()
+            .setActions(
+                PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_STOP or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackStateCompat.ACTION_FAST_FORWARD or
+                        PlaybackStateCompat.ACTION_REWIND
+            )
+            .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, speed)
+            .build()
+    }
+
+    /** Keep the session's PlaybackState and active flag in sync with the current TTS status. */
+    private fun updatePlaybackState(status: TTSHelper.TTSStatus) {
+        val session = mediaSession ?: return
+        session.setPlaybackState(buildPlaybackState(status))
+        session.isActive = status != TTSHelper.TTSStatus.IsStopped
     }
 
     fun releaseMediaSession() {
@@ -126,13 +229,16 @@ object TTSNotifications {
     }
 
     fun createNotification(
-        title: String,
-        chapter: UiText,
-        icon: Bitmap?,
         status: TTSHelper.TTSStatus,
         context: Context?
     ): Notification? {
         if (context == null) return null
+
+        // Sync the media session first so system media controls and hardware/Bluetooth buttons
+        // reflect (and route to) the current play/pause state and now-playing text on every update.
+        refreshCover(context)
+        updatePlaybackState(status)
+        applyMetadata()
 
         if (status == TTSHelper.TTSStatus.IsStopped) {
             NotificationManagerCompat.from(context).cancel(TTS_NOTIFICATION_ID)
@@ -143,16 +249,21 @@ object TTSNotifications {
             hasCreateedNotificationChannel = true
             createNotificationChannel(context)
         }
+        // Title = line currently being read; text = upcoming line (shown greyed beneath by the
+        // system template / media UI). Subtext keeps the book title for context.
+        val contentTitle = lineText.ifBlank { bookTitle }.ifBlank { context.getString(R.string.app_name) }
         val builder = NotificationCompat.Builder(context, TTS_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
-            .setContentTitle(title)
-            .setContentText(chapter.asString(context))
+            .setContentTitle(contentTitle)
+            .setContentText(upcomingText)
+            .setSubText(bookTitle.takeIf { it.isNotBlank() })
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setOngoing(true)
 
-        if (icon != null) builder.setLargeIcon(icon)
+        poster?.let { builder.setLargeIcon(it) }
 
         val cancelButton = MediaButtonReceiver.buildMediaButtonPendingIntent(
             context,
@@ -272,14 +383,11 @@ object TTSNotifications {
     }
 
     fun notify(
-        title: String,
-        chapter: UiText,
-        icon: Bitmap?,
         status: TTSHelper.TTSStatus,
         context: Context?
     ) {
         if (context == null) return
-        val notification = createNotification(title, chapter, icon, status, context) ?: return
+        val notification = createNotification(status, context) ?: return
 
         with(NotificationManagerCompat.from(context)) {
             // notificationId is a unique int for each notification that you must define

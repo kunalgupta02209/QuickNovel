@@ -1,11 +1,13 @@
 package com.lagradost.quicknovel
 
+import android.Manifest
 import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.content.res.Resources
@@ -23,6 +25,7 @@ import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -159,6 +162,21 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
     lateinit var binding: ReadMainBinding
     private val viewModel: ReadActivityViewModel by viewModels()
+
+    // Registered as a property so it is set up before the activity is STARTED (registering later
+    // throws). Used to prompt for POST_NOTIFICATIONS so the TTS media notification can be shown.
+    private val requestNotificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* result ignored */ }
+
+    /** On Android 13+, request notification permission if missing so the TTS controls can appear. */
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     private var _imageHolder: WeakReference<LinearLayout>? = null
     var imageHolder
@@ -829,6 +847,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
         binding.readActionTts.setOnClickListener {
             //scrollToDesired()
+            ensureNotificationPermission()
             viewModel.startTTS()
         }
 

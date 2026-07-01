@@ -41,6 +41,12 @@
     <string name="rating_format_key">rating_format</string>
     <string name="grid_format_key">grid_format</string>
     <string name="download_format_key">download_format</string>
+    <string name="show_covers_key">show_covers</string>
+    <string name="show_covers">Show book covers</string>
+    <string name="hide_covers">Hide book covers</string>
+    <string name="tts_show_cover_key">tts_show_cover</string>
+    <string name="tts_show_cover">Show cover in read-aloud notification</string>
+    <string name="tts_show_cover_desc">Display the novel cover in the text-to-speech notification and media controls</string>
     <string name="exampleTXT">"this is <annotation key="rounded">a regular</annotation> paragraph."</string>
     <string name="tags">Tags</string>
     <string name="views">Views</string>
