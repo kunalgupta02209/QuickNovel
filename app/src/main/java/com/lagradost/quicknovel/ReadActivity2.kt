@@ -66,8 +66,12 @@ import com.lagradost.quicknovel.ui.TextAdapter
 import com.lagradost.quicknovel.ui.TextConfig
 import com.lagradost.quicknovel.ui.TextVisualLine
 import com.lagradost.quicknovel.ui.ViewHolderState
+import com.lagradost.quicknovel.tts.ModelDownloadState
+import com.lagradost.quicknovel.tts.TtsModels
+import com.lagradost.quicknovel.ui.TtsEngineType
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.SingleSelectionHelper.showDialog
+import kotlinx.coroutines.flow.first
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
 import com.lagradost.quicknovel.util.UIHelper.getStatusBarHeight
@@ -1287,6 +1291,17 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
+            // One-tap reset buttons for speed/pitch (the label tap-to-reset popup is kept too).
+            binding.readSettingsTtsSpeedReset.setOnClickListener {
+                viewModel.ttsSpeed = 1.0f
+                binding.readSettingsTtsSpeed.setValueRounded(viewModel.ttsSpeed)
+            }
+
+            binding.readSettingsTtsPitchReset.setOnClickListener {
+                viewModel.ttsPitch = 1.0f
+                binding.readSettingsTtsPitch.setValueRounded(viewModel.ttsPitch)
+            }
+
             binding.readSettingsTextPaddingText.setOnClickListener {
                 it.popupMenu(
                     items = listOf(1 to R.string.reset_value),
@@ -1447,7 +1462,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
             binding.readLanguage.setOnClickListener { _ ->
                 ioSafe {
-                    val tts = viewModel.ttsSession?.requireTTS() ?: return@ioSafe
+                    val tts = (viewModel.ttsSession as? TTSSession)?.requireTTS() ?: return@ioSafe
 
                     runOnUiThread {
                         val languages = mutableListOf<Locale?>(null).apply {
@@ -1513,9 +1528,76 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
+            // Read-aloud engine selector (System / On-device). In P1 the on-device engine is not yet
+            // wired to audio, so selecting it stores the pref but playback still uses System TTS.
+            binding.readTtsEngine.setOnClickListener { view ->
+                val context = view.context
+                val engines = TtsEngineType.entries
+                context.showDialog(
+                    engines.map { context.getString(it.stringRes) },
+                    engines.indexOf(viewModel.ttsEngineType),
+                    context.getString(R.string.tts_engine), false, {}
+                ) { index ->
+                    val chosen = engines[index]
+                    viewModel.ttsEngineType = chosen
+                    if (chosen == TtsEngineType.ON_DEVICE &&
+                        !viewModel.modelDownloads(context).isReady(viewModel.ttsOnDeviceModel)
+                    ) {
+                        showToast(context.getString(R.string.tts_model_not_downloaded))
+                    }
+                }
+            }
+
+            // On-device voice-model picker + download-on-first-run.
+            binding.readTtsModel.setOnClickListener { view ->
+                val context = view.context
+                val mgr = viewModel.modelDownloads(context)
+                val models = TtsModels.ALL
+                val labels = models.map { def ->
+                    val suffix = when {
+                        !def.supported -> "n/a"
+                        mgr.isReady(def.id) -> context.getString(R.string.tts_model_ready)
+                        else -> "${def.approxSizeMb} MB"
+                    }
+                    "${def.displayName}  ·  $suffix"
+                }
+                context.showDialog(
+                    labels,
+                    models.indexOfFirst { it.id == viewModel.ttsOnDeviceModel },
+                    context.getString(R.string.tts_model), false, {}
+                ) { index ->
+                    val def = models[index]
+                    when {
+                        !def.supported -> showToast(def.note)
+                        mgr.isReady(def.id) -> {
+                            viewModel.ttsOnDeviceModel = def.id
+                            AlertDialog.Builder(context)
+                                .setTitle(def.displayName)
+                                .setMessage(R.string.tts_model_ready)
+                                .setPositiveButton(R.string.tts_delete_model) { _, _ -> mgr.delete(def.id) }
+                                .setNegativeButton(R.string.cancel, null)
+                                .show()
+                        }
+                        else -> {
+                            viewModel.ttsOnDeviceModel = def.id
+                            showToast(context.getString(R.string.tts_model_downloading_format, def.displayName, 0))
+                            viewModel.downloadModel(context, def.id)
+                            ioSafe {
+                                val s = mgr.states.first { st ->
+                                    st[def.id] is ModelDownloadState.Ready || st[def.id] is ModelDownloadState.Error
+                                }
+                                if (s[def.id] is ModelDownloadState.Ready)
+                                    showToast("${def.displayName}: ${context.getString(R.string.tts_model_ready)}")
+                                else showToast(context.getString(R.string.tts_model_download_failed))
+                            }
+                        }
+                    }
+                }
+            }
+
             binding.readVoice.setOnClickListener {
                 ioSafe {
-                    val tts = viewModel.ttsSession?.requireTTS() ?: return@ioSafe
+                    val tts = (viewModel.ttsSession as? TTSSession)?.requireTTS() ?: return@ioSafe
 
                     runOnUiThread {
                         val matchAgainst = tts.voice.locale

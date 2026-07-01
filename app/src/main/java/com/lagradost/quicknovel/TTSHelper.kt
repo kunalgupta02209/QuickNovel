@@ -18,6 +18,7 @@ import com.lagradost.quicknovel.BaseApplication.Companion.removeKey
 import com.lagradost.quicknovel.BaseApplication.Companion.setKey
 import com.lagradost.quicknovel.mvvm.debugAssert
 import com.lagradost.quicknovel.receivers.BecomingNoisyReceiver
+import com.lagradost.quicknovel.tts.TtsEngine
 import com.lagradost.quicknovel.ui.UiText
 import com.lagradost.quicknovel.ui.txt
 import com.lagradost.quicknovel.util.UIHelper.requestAudioFocus
@@ -34,7 +35,7 @@ import java.util.Stack
 import kotlin.math.roundToInt
 
 
-class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boolean) {
+class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boolean) : TtsEngine {
     private val intentFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
     private val myNoisyAudioStreamReceiver = BecomingNoisyReceiver()
 
@@ -64,7 +65,7 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
     private var speed: Float = 1.0f
     private var pitch: Float = 1.0f
 
-    fun isValidTTS(): Boolean {
+    override fun isValidTTS(): Boolean {
         return tts != null
     }
 
@@ -73,12 +74,12 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         TTSQueue = null
     }
 
-    fun setSpeed(speed: Float) {
+    override fun setSpeed(speed: Float) {
         this.speed = speed
         tts?.setSpeechRate(speed)
     }
 
-    fun setPitch(pitch: Float) {
+    override fun setPitch(pitch: Float) {
         this.pitch = pitch
         tts?.setPitch(pitch)
     }
@@ -102,24 +103,26 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         tts.voice = voice ?: tts.defaultVoice
     }
 
-    fun interruptTTS() {
+    override fun interruptTTS() {
         // we don't actually want to initialize tts here
         tts?.let { tts ->
             clearTTS(tts)
         }
     }
 
-    fun ttsInitialized(): Boolean {
+    override fun ttsInitialized(): Boolean {
         return tts != null
     }
 
-    suspend fun speak(
+    override suspend fun speak(
         line: TTSHelper.TTSLine,
-        next: TTSHelper.TTSLine?,
+        upcoming: List<TTSHelper.TTSLine>,
         action: () -> Boolean
     ): Int? {
         val tts = requireTTS(action) ?: return null
 
+        // The system engine buffers exactly one sentence ahead (QUEUE_ADD), preserving today's behavior.
+        val next = upcoming.firstOrNull()
         val queue = TTSQueue
         val ret = if (queue?.first == line) {
             queue.second
@@ -139,7 +142,7 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
 
     /** waits for sentence to be finished or action to be true, if action is true then
      * break early and interrupt TTS */
-    suspend fun waitForOr(id: Int?, action: () -> Boolean, then: () -> Unit) {
+    override suspend fun waitForOr(id: Int?, action: () -> Boolean, then: () -> Unit) {
         if (id == null) return
         while (id > TTSEndSpeakId) {
             delay(50)
@@ -248,14 +251,14 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
     }
 
 
-    fun register() {
+    override fun register() {
         if (isRegistered) return
         isRegistered = true
         context.registerReceiver(myNoisyAudioStreamReceiver, intentFilter)
         context.requestAudioFocus(focusRequest)
     }
 
-    fun release() {
+    override fun release() {
         tts?.apply {
             stop()
             setOnUtteranceProgressListener(null) // Fucking retarded leak
@@ -267,7 +270,7 @@ class TTSSession(val context: Context, event: (TTSHelper.TTSActionType) -> Boole
         unregister()
     }
 
-    fun unregister() {
+    override fun unregister() {
         if (!isRegistered) return
         isRegistered = false
         context.unregisterReceiver(myNoisyAudioStreamReceiver)

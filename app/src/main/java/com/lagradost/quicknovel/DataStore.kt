@@ -34,6 +34,12 @@ const val RESULT_CHAPTER_FILTER_BOOKMARKED: String = "result_chapter_filter_book
 const val RESULT_CHAPTER_FILTER_READ: String = "result_chapter_filter_read"
 const val RESULT_CHAPTER_FILTER_UNREAD: String = "result_chapter_filter_unread"
 const val EPUB_TTS_SET_PITCH: String = "reader_epub_tts_pitch"
+
+// On-device neural TTS engine (sherpa-onnx). Kept separate from EPUB_VOICE/EPUB_LANG (different id scheme).
+const val EPUB_TTS_ENGINE: String = "reader_epub_tts_engine"       // Int: 0=System, 1=OnDevice
+const val EPUB_TTS_OD_MODEL: String = "reader_epub_tts_od_model"   // String: model id (see TtsModels)
+const val EPUB_TTS_OD_VOICE: String = "reader_epub_tts_od_voice"   // String: "<modelId>:<sid>"
+const val EPUB_TTS_OD_BUFFER: String = "reader_epub_tts_od_buffer" // Int: sentences to buffer ahead (1..6)
 const val EPUB_BG_COLOR: String = "reader_epub_bg_color"
 const val EPUB_TEXT_COLOR: String = "reader_epub_text_color"
 const val EPUB_TEXT_VERTICAL_PADDING: String = "reader_epub_vertical_padding"

@@ -14,6 +14,8 @@ dependencyResolutionManagement {
         mavenCentral()
         mavenLocal()
         maven("https://jitpack.io")
+        // vendored sherpa-onnx.aar for on-device neural TTS (FAIL_ON_PROJECT_REPOS forbids flatDir in the app module)
+        flatDir { dirs("app/libs") }
     }
 }
 

@@ -49,6 +49,9 @@ import com.lagradost.quicknovel.TTSHelper.preParseHtml
 import com.lagradost.quicknovel.TTSHelper.ttsParseText
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.letInner
+import com.lagradost.quicknovel.tts.ModelDownloadManager
+import com.lagradost.quicknovel.tts.TtsEngine
+import com.lagradost.quicknovel.ui.TtsEngineType
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.mvvm.map
 import com.lagradost.quicknovel.mvvm.safe
@@ -1350,7 +1353,7 @@ class ReadActivityViewModel : ViewModel() {
 
     // ========================================  TTS STUFF ========================================
 
-    var ttsSession: TTSSession? = null
+    var ttsSession: TtsEngine? = null
 
     private fun initTTSSession(context: Context) {
         runOnMainThread {
@@ -1377,11 +1380,12 @@ class ReadActivityViewModel : ViewModel() {
     }
 
     fun setTTSLanguage(locale: Locale?) {
-        ttsSession?.setLanguage(locale)
+        // System-only concept; no-op on non-system engines.
+        (ttsSession as? TTSSession)?.setLanguage(locale)
     }
 
     fun setTTSVoice(voice: Voice?) {
-        ttsSession?.setVoice(voice)
+        (ttsSession as? TTSSession)?.setVoice(voice)
     }
 
     fun pauseTTS() {
@@ -1574,7 +1578,7 @@ class ReadActivityViewModel : ViewModel() {
                         // wait for next line
                         val waitFor = ttsSession.speak(
                             line,
-                            nextLine
+                            listOfNotNull(nextLine)
                         ) {
                             currentTTSStatus != TTSHelper.TTSStatus.IsRunning || pendingTTSSkip != 0
                         }
@@ -1820,6 +1824,39 @@ class ReadActivityViewModel : ViewModel() {
             ttsSession?.setPitch(value)
             ttsPitchKey = value
         }
+
+    // ---- On-device neural TTS (engine/model/voice/buffer) ----
+    private var ttsEngineInternal by PreferenceDelegate(EPUB_TTS_ENGINE, TtsEngineType.SYSTEM.prefValue, Int::class)
+    var ttsEngineType: TtsEngineType
+        get() = TtsEngineType.fromSpinner(ttsEngineInternal)
+        set(value) {
+            ttsEngineInternal = value.prefValue
+            recreateTtsEngine()
+        }
+    var ttsOnDeviceModel by PreferenceDelegate(EPUB_TTS_OD_MODEL, "kitten", String::class)
+    var ttsOnDeviceVoice by PreferenceDelegate(EPUB_TTS_OD_VOICE, "", String::class)
+    var ttsLookahead by PreferenceDelegate(EPUB_TTS_OD_BUFFER, 3, Int::class)
+
+    private var _modelDownloads: ModelDownloadManager? = null
+    fun modelDownloads(context: Context): ModelDownloadManager =
+        _modelDownloads ?: ModelDownloadManager(context).also { _modelDownloads = it }
+
+    /** Start (or no-op if already downloaded) an on-device model download; observe [ModelDownloadManager.states]. */
+    fun downloadModel(context: Context, id: String) {
+        val mgr = modelDownloads(context)
+        viewModelScope.launch { mgr.download(id) }
+    }
+
+    /** Rebuild the active engine after an engine/model/voice change. In P1 this always yields TTSSession
+     * (on-device playback is wired in P2); the pref is stored so the selection persists. */
+    private fun recreateTtsEngine() {
+        val ctx = context ?: return
+        val wasRunning = isTTSRunning()
+        stopTTS()
+        ttsSession?.release()
+        initTTSSession(ctx)
+        if (wasRunning) startTTS()
+    }
 
 
     val textFontLive: MutableLiveData<String> = MutableLiveData(null)

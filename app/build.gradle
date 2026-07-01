@@ -42,6 +42,17 @@ android {
         }
     }
 
+    // Per-ABI APKs so the ~57 MB sherpa native libs don't bloat a single universal APK.
+    // Keep x86_64 for the emulator; drop dead x86.
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk false
+        }
+    }
+
     buildFeatures.buildConfig true
 
     compileOptions {
@@ -51,7 +62,9 @@ android {
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_1_9.toString()
-        freeCompilerArgs = ['-XXLanguage:+PropertyParamAnnotationDefaultTargetMode']
+        // -Xlambdas=class required (Kotlin 2.3.0): sherpa OfflineTts.generateWithCallback resolves the
+        // (FloatArray)->Int callback via JNI GetMethodID("invoke",...), which only exists on class-based lambdas.
+        freeCompilerArgs = ['-XXLanguage:+PropertyParamAnnotationDefaultTargetMode', '-Xlambdas=class']
     }
     namespace 'com.lagradost.quicknovel'
 }
@@ -66,6 +79,9 @@ repositories {
 
 dependencies {
     implementation fileTree(dir: "libs", include: ["*.jar"])
+    // On-device neural TTS (sherpa-onnx) — vendored AAR in app/libs (see flatDir in settings.gradle.kts)
+    implementation(name: 'sherpa-onnx', ext: 'aar')
+    implementation 'org.apache.commons:commons-compress:1.27.1' // tar.bz2 model extraction
     //noinspection GradleDependency
     implementation 'androidx.core:core-ktx:1.16.0'
     implementation 'androidx.appcompat:appcompat:1.7.1'

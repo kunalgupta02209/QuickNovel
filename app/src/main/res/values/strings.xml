@@ -185,6 +185,17 @@
     <string name="tts_locale">Language</string>
     <string name="tts_voice">Voice</string>
     <string name="tts_voice_title">TTS Voice</string>
+    <string name="tts_engine">Read-aloud engine</string>
+    <string name="tts_engine_system">System TTS</string>
+    <string name="tts_engine_on_device">On-device (neural)</string>
+    <string name="tts_model">Voice model</string>
+    <string name="tts_buffer_sentences">Sentences to buffer</string>
+    <string name="tts_download_model">Download voice model</string>
+    <string name="tts_delete_model">Delete model</string>
+    <string name="tts_model_not_downloaded">Download an on-device voice model first</string>
+    <string name="tts_model_downloading_format">Downloading %1$s… %2$d%%</string>
+    <string name="tts_model_ready">Ready</string>
+    <string name="tts_model_download_failed">Model download failed</string>
     <string name="theme_key">theme_key</string>
     <string name="theme">Theme</string>
     <string name="primary_color_key">primary_color_key</string>
