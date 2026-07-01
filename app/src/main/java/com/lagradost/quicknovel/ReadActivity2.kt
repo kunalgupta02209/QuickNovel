@@ -391,6 +391,17 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
     private var cachedChapter: List<SpanDisplay> = emptyList()
+
+    // The latest novel title emitted by the view model. The toolbar title is hidden while
+    // read-aloud (TTS) is active, so we keep the value here and re-apply it once TTS stops.
+    private var latestNovelTitle: String? = null
+    private var isReadAloudActive: Boolean = false
+
+    /** Shows the novel title in the toolbar unless read-aloud is active, in which case it is hidden. */
+    private fun updateToolbarTitleVisibility() {
+        binding.readToolbar.title = if (isReadAloudActive) null else latestNovelTitle
+    }
+
     private fun scrollToDesired() {
         val desired: ScrollIndex = viewModel.desiredIndex ?: return
         val adapterPosition =
@@ -851,7 +862,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         }
 
         observe(viewModel.title) { title ->
-            binding.readToolbar.title = title
+            latestNovelTitle = title
+            updateToolbarTitleVisibility()
         }
 
         observe(viewModel.chapterTile) { title ->
@@ -906,6 +918,10 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
         observe(viewModel.ttsStatus) { status ->
             val isTTSRunning = status != TTSHelper.TTSStatus.IsStopped
+
+            // Hide the novel title from the toolbar while read-aloud is active, restore it when stopped.
+            isReadAloudActive = isTTSRunning
+            updateToolbarTitleVisibility()
 
             /*if (isTTSRunning) {
                 binding.readToolbar.inflateMenu(R.menu.sleep_timer)
