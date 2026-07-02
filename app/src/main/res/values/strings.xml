@@ -196,6 +196,8 @@
     <string name="tts_model_downloading_format">Downloading %1$s… %2$d%%</string>
     <string name="tts_model_ready">Ready</string>
     <string name="tts_model_download_failed">Model download failed</string>
+    <string name="tts_settings_title">Read-aloud settings</string>
+    <string name="tts_settings">Read-aloud settings</string>
     <string name="theme_key">theme_key</string>
     <string name="theme">Theme</string>
     <string name="primary_color_key">primary_color_key</string>

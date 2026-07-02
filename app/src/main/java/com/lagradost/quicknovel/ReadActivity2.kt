@@ -51,6 +51,10 @@ import com.lagradost.quicknovel.databinding.ColorRoundCheckmarkBinding
 import com.lagradost.quicknovel.databinding.ReadBottomSettingsBinding
 import com.lagradost.quicknovel.databinding.ReadMainBinding
 import com.lagradost.quicknovel.databinding.SingleOverscrollChapterBinding
+import com.lagradost.quicknovel.databinding.TtsModelRowBinding
+import com.lagradost.quicknovel.databinding.TtsSettingsBinding
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.observe
 import com.lagradost.quicknovel.mvvm.observeNullable
@@ -422,6 +426,100 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     /** Shows the novel title in the toolbar unless read-aloud is active, in which case it is hidden. */
     private fun updateToolbarTitleVisibility() {
         binding.readToolbar.title = if (isReadAloudActive) null else latestNovelTitle
+    }
+
+    /** Dedicated Read-aloud settings sheet: engine, on-device model manager (with live download
+     *  progress), neural voice, and the sentences-to-buffer look-ahead. */
+    private fun showTtsSettingsDialog() {
+        val ctx = this
+        val b = TtsSettingsBinding.inflate(layoutInflater)
+        val dialog = BottomSheetDialog(ctx)
+        dialog.setContentView(b.root)
+        val mgr = viewModel.modelDownloads(ctx)
+        val rows = HashMap<String, TtsModelRowBinding>()
+
+        fun refreshEngine() {
+            val onDevice = viewModel.ttsEngineType == TtsEngineType.ON_DEVICE
+            b.ttsEngineSystem.alpha = if (onDevice) 0.5f else 1f
+            b.ttsEngineOndevice.alpha = if (onDevice) 1f else 0.5f
+            b.ttsOndeviceSection.isVisible = onDevice
+        }
+        b.ttsEngineSystem.setOnClickListener { viewModel.ttsEngineType = TtsEngineType.SYSTEM; refreshEngine() }
+        b.ttsEngineOndevice.setOnClickListener { viewModel.ttsEngineType = TtsEngineType.ON_DEVICE; refreshEngine() }
+
+        fun bindRow(def: TtsModels.ModelDef, row: TtsModelRowBinding, state: ModelDownloadState) {
+            row.modelName.text = def.displayName
+            val ready = def.supported && mgr.isReady(def.id)
+            row.modelSelected.visibility =
+                if (ready && def.id == viewModel.ttsOnDeviceModel) View.VISIBLE else View.INVISIBLE
+            row.modelProgress.isGone = true
+            row.modelAction.isVisible = def.supported
+            when {
+                !def.supported -> row.modelSubtitle.text = def.note
+                state is ModelDownloadState.Downloading -> {
+                    val pct = (state.progress * 100).toInt()
+                    row.modelSubtitle.text = getString(R.string.tts_model_downloading_format, def.displayName, pct)
+                    row.modelProgress.isVisible = true
+                    row.modelProgress.setProgressCompat(pct, true)
+                    row.modelAction.isGone = true
+                }
+                ready -> {
+                    row.modelSubtitle.text = "${def.approxSizeMb} MB · ${getString(R.string.tts_model_ready)}"
+                    row.modelAction.text = getString(R.string.tts_delete_model)
+                    row.modelAction.setOnClickListener { mgr.delete(def.id); bindRow(def, row, ModelDownloadState.Idle) }
+                }
+                state is ModelDownloadState.Error -> {
+                    row.modelSubtitle.text = getString(R.string.tts_model_download_failed)
+                    row.modelAction.text = getString(R.string.tts_download_model)
+                    row.modelAction.setOnClickListener { viewModel.downloadModel(ctx, def.id) }
+                }
+                else -> {
+                    row.modelSubtitle.text = "${def.approxSizeMb} MB · ${def.note}"
+                    row.modelAction.text = getString(R.string.tts_download_model)
+                    row.modelAction.setOnClickListener { viewModel.downloadModel(ctx, def.id) }
+                }
+            }
+            row.root.setOnClickListener {
+                if (def.supported && mgr.isReady(def.id)) {
+                    viewModel.ttsOnDeviceModel = def.id
+                    rows.forEach { (id, r) ->
+                        r.modelSelected.visibility = if (id == def.id) View.VISIBLE else View.INVISIBLE
+                    }
+                }
+            }
+        }
+
+        val initial = mgr.states.value
+        for (def in TtsModels.ALL) {
+            val row = TtsModelRowBinding.inflate(layoutInflater, b.ttsModelContainer, false)
+            rows[def.id] = row
+            bindRow(def, row, initial[def.id] ?: ModelDownloadState.Idle)
+            b.ttsModelContainer.addView(row.root)
+        }
+        val job = lifecycleScope.launch {
+            mgr.states.collect { states ->
+                for (def in TtsModels.ALL) rows[def.id]?.let { bindRow(def, it, states[def.id] ?: ModelDownloadState.Idle) }
+            }
+        }
+        dialog.setOnDismissListener { job.cancel() }
+
+        b.ttsVoiceButton.setOnClickListener {
+            val def = TtsModels.byId(viewModel.ttsOnDeviceModel)
+            val count = def.speakerCount.coerceAtLeast(1)
+            if (count <= 1) { showToast("${def.displayName} — single voice"); return@setOnClickListener }
+            val names = (0 until count).map { "${getString(R.string.tts_voice)} ${it + 1}" }
+            val current = (TtsModels.parseVoice(viewModel.ttsOnDeviceVoice)?.second ?: 0).coerceIn(0, count - 1)
+            ctx.showDialog(names, current, getString(R.string.tts_voice), false, {}) { idx ->
+                viewModel.ttsOnDeviceVoice = TtsModels.voiceName(def, idx)
+            }
+        }
+
+        b.ttsBufferSlider.value = viewModel.ttsLookahead.coerceIn(1, 6).toFloat()
+        b.ttsBufferSlider.addOnChangeListener { _, value, _ -> viewModel.ttsLookahead = value.toInt() }
+
+        b.ttsSettingsDone.setOnClickListener { dialog.dismiss() }
+        refreshEngine()
+        dialog.show()
     }
 
     private fun scrollToDesired() {
@@ -1528,72 +1626,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 }
             }
 
-            // Read-aloud engine selector (System / On-device). In P1 the on-device engine is not yet
-            // wired to audio, so selecting it stores the pref but playback still uses System TTS.
-            binding.readTtsEngine.setOnClickListener { view ->
-                val context = view.context
-                val engines = TtsEngineType.entries
-                context.showDialog(
-                    engines.map { context.getString(it.stringRes) },
-                    engines.indexOf(viewModel.ttsEngineType),
-                    context.getString(R.string.tts_engine), false, {}
-                ) { index ->
-                    val chosen = engines[index]
-                    viewModel.ttsEngineType = chosen
-                    if (chosen == TtsEngineType.ON_DEVICE &&
-                        !viewModel.modelDownloads(context).isReady(viewModel.ttsOnDeviceModel)
-                    ) {
-                        showToast(context.getString(R.string.tts_model_not_downloaded))
-                    }
-                }
-            }
-
-            // On-device voice-model picker + download-on-first-run.
-            binding.readTtsModel.setOnClickListener { view ->
-                val context = view.context
-                val mgr = viewModel.modelDownloads(context)
-                val models = TtsModels.ALL
-                val labels = models.map { def ->
-                    val suffix = when {
-                        !def.supported -> "n/a"
-                        mgr.isReady(def.id) -> context.getString(R.string.tts_model_ready)
-                        else -> "${def.approxSizeMb} MB"
-                    }
-                    "${def.displayName}  ·  $suffix"
-                }
-                context.showDialog(
-                    labels,
-                    models.indexOfFirst { it.id == viewModel.ttsOnDeviceModel },
-                    context.getString(R.string.tts_model), false, {}
-                ) { index ->
-                    val def = models[index]
-                    when {
-                        !def.supported -> showToast(def.note)
-                        mgr.isReady(def.id) -> {
-                            viewModel.ttsOnDeviceModel = def.id
-                            AlertDialog.Builder(context)
-                                .setTitle(def.displayName)
-                                .setMessage(R.string.tts_model_ready)
-                                .setPositiveButton(R.string.tts_delete_model) { _, _ -> mgr.delete(def.id) }
-                                .setNegativeButton(R.string.cancel, null)
-                                .show()
-                        }
-                        else -> {
-                            viewModel.ttsOnDeviceModel = def.id
-                            showToast(context.getString(R.string.tts_model_downloading_format, def.displayName, 0))
-                            viewModel.downloadModel(context, def.id)
-                            ioSafe {
-                                val s = mgr.states.first { st ->
-                                    st[def.id] is ModelDownloadState.Ready || st[def.id] is ModelDownloadState.Error
-                                }
-                                if (s[def.id] is ModelDownloadState.Ready)
-                                    showToast("${def.displayName}: ${context.getString(R.string.tts_model_ready)}")
-                                else showToast(context.getString(R.string.tts_model_download_failed))
-                            }
-                        }
-                    }
-                }
-            }
+            // Dedicated Read-aloud settings (engine, model manager + download progress, voice, buffer).
+            binding.readTtsSettings.setOnClickListener { showTtsSettingsDialog() }
 
             binding.readVoice.setOnClickListener {
                 ioSafe {
