@@ -50,6 +50,8 @@ object TtsModels {
         val assets: List<Asset>,
         val note: String = "",
         val supported: Boolean = true,
+        /** ISO-639-1 language the model speaks; "" = multilingual / skip the language guard. */
+        val lang: String = "en",
     )
 
     val ALL: List<ModelDef> = listOf(
@@ -96,6 +98,7 @@ object TtsModels {
                 Asset("$VOCODER_BASE/vocos_24khz.onnx", archive = false, fileName = "vocos_24khz.onnx"),
             ),
             note = "Zero-shot cloning. Uses a bundled reference voice (zh-en).",
+            lang = "", // multilingual (zh-en) — skip the English-only guard
         ),
         ModelDef(
             id = "stylettes2",

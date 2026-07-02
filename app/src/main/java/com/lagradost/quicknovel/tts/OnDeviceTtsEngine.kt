@@ -1,12 +1,19 @@
 package com.lagradost.quicknovel.tts
 
 import android.content.Context
+import android.content.IntentFilter
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.lagradost.quicknovel.TTSHelper
 import com.lagradost.quicknovel.mvvm.logError
+import com.lagradost.quicknovel.receivers.BecomingNoisyReceiver
+import com.lagradost.quicknovel.util.UIHelper.requestAudioFocus
+import com.lagradost.quicknovel.util.UIHelper.unRequestAudioFocus
 import kotlinx.coroutines.delay
 
 /**
@@ -31,7 +38,7 @@ class OnDeviceTtsEngine(
     modelId: String,
     voiceId: String,
     lookahead: Int,
-    @Suppress("unused") private val event: (TTSHelper.TTSActionType) -> Boolean,
+    private val event: (TTSHelper.TTSActionType) -> Boolean,
 ) : TtsEngine {
     private val appContext = context.applicationContext
     private val def = TtsModels.byId(modelId)
@@ -51,6 +58,38 @@ class OnDeviceTtsEngine(
     @Volatile private var tts: OfflineTts? = null
     @Volatile private var track: AudioTrack? = null
     private var sampleRate = 24000
+
+    // ---- audio focus + ducking + becoming-noisy (headphone unplug) ----
+    private var focusRequest: AudioFocusRequest? = null
+    private val noisyReceiver = BecomingNoisyReceiver()
+    private val noisyFilter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+    @Volatile private var focusRegistered = false
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ->
+                event(TTSHelper.TTSActionType.Pause)
+            // A self-managed AudioTrack does not auto-duck — lower the volume ourselves.
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK ->
+                runCatching { track?.setVolume(DUCK_VOLUME) }
+            AudioManager.AUDIOFOCUS_GAIN ->
+                runCatching { track?.setVolume(1.0f) }
+        }
+    }
+
+    init {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).run {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                setOnAudioFocusChangeListener(focusListener)
+                build()
+            }
+        }
+    }
 
     private class Slot(val id: Int, val line: TTSHelper.TTSLine) {
         @Volatile var pcm: FloatArray? = null
@@ -113,15 +152,27 @@ class OnDeviceTtsEngine(
             logError(t); null
         }
 
+        if (!focusRegistered) {
+            focusRegistered = true
+            appContext.requestAudioFocus(focusRequest)
+            runCatching { appContext.registerReceiver(noisyReceiver, noisyFilter) }
+        }
+
         running = true
         consumer = Thread({ consumeLoop() }, "tts-audio").apply { isDaemon = true; start() }
         producer = Thread({ produceLoop() }, "tts-synth").apply { isDaemon = true; start() }
     }
 
-    override fun unregister() { /* focus/noisy handling added in a later phase */ }
+    override fun unregister() {
+        if (!focusRegistered) return
+        focusRegistered = false
+        appContext.unRequestAudioFocus(focusRequest)
+        runCatching { appContext.unregisterReceiver(noisyReceiver) }
+    }
 
     override fun release() {
         running = false
+        unregister()
         synchronized(lock) {
             slots.forEach { it.cancelled = true }
             slots.clear(); playIndex = 0
@@ -299,5 +350,6 @@ class OnDeviceTtsEngine(
         private const val BEHIND = 2
         private const val MAX_LOOKAHEAD = 6
         private const val WRITE_CHUNK = 4096 // floats per AudioTrack.write
+        private const val DUCK_VOLUME = 0.3f // volume while ducking under a transient focus loss
     }
 }

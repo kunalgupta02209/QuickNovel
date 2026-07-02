@@ -198,6 +198,7 @@
     <string name="tts_model_download_failed">Model download failed</string>
     <string name="tts_settings_title">Read-aloud settings</string>
     <string name="tts_settings">Read-aloud settings</string>
+    <string name="tts_language_mismatch">This voice model is English-only — using System TTS for this book.</string>
     <string name="theme_key">theme_key</string>
     <string name="theme">Theme</string>
     <string name="primary_color_key">primary_color_key</string>

@@ -53,6 +53,7 @@ import com.lagradost.quicknovel.mvvm.letInner
 import com.lagradost.quicknovel.tts.ModelDownloadManager
 import com.lagradost.quicknovel.tts.OnDeviceTtsEngine
 import com.lagradost.quicknovel.tts.TtsEngine
+import com.lagradost.quicknovel.tts.TtsModels
 import com.lagradost.quicknovel.ui.TtsEngineType
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.mvvm.map
@@ -1357,17 +1358,31 @@ class ReadActivityViewModel : ViewModel() {
 
     var ttsSession: TtsEngine? = null
 
+    /** English-only on-device models mispronounce other languages; check the rendered-text language.
+     *  Returns true when the model has no language restriction, the content language is unknown, or
+     *  it matches the model. */
+    private fun onDeviceLanguageOk(): Boolean {
+        val modelLang = TtsModels.byId(ttsOnDeviceModel).lang
+        if (modelLang.isBlank()) return true
+        val contentLang = runCatching { mlSettings.to }.getOrNull()?.take(2) ?: return true
+        return contentLang.equals(modelLang.take(2), ignoreCase = true)
+    }
+
     private fun initTTSSession(context: Context) {
         runOnMainThread {
-            val useOnDevice = ttsEngineType == TtsEngineType.ON_DEVICE &&
+            val modelReady = ttsEngineType == TtsEngineType.ON_DEVICE &&
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                     modelDownloads(context).isReady(ttsOnDeviceModel)
-            ttsSession = if (useOnDevice) {
+            val langOk = onDeviceLanguageOk()
+            ttsSession = if (modelReady && langOk) {
                 OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ::parseAction).also {
                     it.onAudibleLine = { line -> _ttsLine.postValue(line) }
                 }
             } else {
-                if (ttsEngineType == TtsEngineType.ON_DEVICE) showToast(R.string.tts_model_not_downloaded)
+                if (ttsEngineType == TtsEngineType.ON_DEVICE) {
+                    if (modelReady && !langOk) showToast(R.string.tts_language_mismatch)
+                    else showToast(R.string.tts_model_not_downloaded)
+                }
                 TTSSession(context, ::parseAction)
             }
         }
