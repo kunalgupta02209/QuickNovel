@@ -39,6 +39,7 @@ class OnDeviceTtsEngine(
     modelId: String,
     voiceId: String,
     lookahead: Int,
+    gapMs: Int,
     private val event: (TTSHelper.TTSActionType) -> Boolean,
 ) : TtsEngine {
     private val appContext = context.applicationContext
@@ -48,17 +49,21 @@ class OnDeviceTtsEngine(
 
     @Volatile private var lookahead: Int = lookahead.coerceIn(1, MAX_LOOKAHEAD)
     @Volatile private var speed: Float = 1.0f
+    @Volatile private var pitch: Float = 1.0f
+    @Volatile private var gapMs: Int = gapMs.coerceIn(0, MAX_GAP_MS)
 
-    /** Fired (from the audio thread) the moment a sentence starts playing → drives the highlight. */
-    var onAudibleLine: ((TTSHelper.TTSLine) -> Unit)? = null
+    /** Fired (audio thread) the moment a sentence starts playing: (current, upcoming) → drives the
+     *  highlight AND the media-notification now-playing text, audio-synced. */
+    var onAudibleLine: ((TTSHelper.TTSLine, TTSHelper.TTSLine?) -> Unit)? = null
 
-    override val supportsPitch: Boolean get() = false
+    override val supportsPitch: Boolean get() = true
     override val supportsSystemLanguagePicker: Boolean get() = false
     override val drivesOwnHighlight: Boolean get() = true
 
     @Volatile private var tts: OfflineTts? = null
     @Volatile private var track: AudioTrack? = null
     private var sampleRate = 24000
+    private val silenceChunk = FloatArray(WRITE_CHUNK) // zeros, reused for writing inter-sentence gaps
 
     // ---- audio focus + ducking + becoming-noisy (headphone unplug) ----
     private var focusRequest: AudioFocusRequest? = null
@@ -141,7 +146,7 @@ class OnDeviceTtsEngine(
                 .setBufferSizeInBytes(bufBytes)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
-                .also { applySpeed(it); it.play() }
+                .also { applyParams(it); it.play() }
         } catch (t: Throwable) { logError(t); null }
 
         if (!focusRegistered) {
@@ -180,18 +185,27 @@ class OnDeviceTtsEngine(
 
     override fun setSpeed(speed: Float) {
         this.speed = if (speed > 0f) speed else 1.0f
-        track?.let { applySpeed(it) }
+        track?.let { applyParams(it) }
     }
 
-    override fun setPitch(pitch: Float) { /* neural models have no pitch control */ }
+    override fun setPitch(pitch: Float) {
+        this.pitch = if (pitch > 0f) pitch else 1.0f
+        track?.let { applyParams(it) }
+    }
 
     /** Live buffer-depth change (no rebuild needed). */
     fun updateLookahead(n: Int) { lookahead = n.coerceIn(1, MAX_LOOKAHEAD) }
 
-    private fun applySpeed(t: AudioTrack) {
+    /** Live inter-sentence gap change (ms). */
+    fun updateGapMs(ms: Int) { gapMs = ms.coerceIn(0, MAX_GAP_MS) }
+
+    // Neural models have no native pitch control, but AudioTrack.PlaybackParams applies a pitch
+    // shift on playback (independent of speed/tempo).
+    private fun applyParams(t: AudioTrack) {
         runCatching {
             val p = t.playbackParams
             p.speed = speed.coerceIn(0.25f, 4.0f)
+            p.pitch = pitch.coerceIn(0.25f, 4.0f)
             t.playbackParams = p
         }
     }
@@ -303,7 +317,9 @@ class OnDeviceTtsEngine(
         synchronized(lock) { item.pcm = out; lock.notifyAll() }
     }
 
-    /** Trim leading/trailing near-silence the model bakes into each sentence, keeping a short tail. */
+    /** Trim leading/trailing near-silence the model bakes into each sentence, so the audible gap is
+     *  exactly the user's configured [gapMs] (written as silence between sentences), not the model's
+     *  variable padding. */
     private fun trimSilence(pcm: FloatArray): FloatArray {
         if (pcm.isEmpty()) return pcm
         var start = 0
@@ -311,9 +327,7 @@ class OnDeviceTtsEngine(
         var end = pcm.size
         while (end > start && kotlin.math.abs(pcm[end - 1]) < SILENCE_THRESHOLD) end--
         if (start >= end) return FloatArray(0)
-        val pad = (sampleRate * INTER_SENTENCE_PAD_SEC).toInt()
-        val e = minOf(pcm.size, end + pad)
-        return if (start == 0 && e == pcm.size) pcm else pcm.copyOfRange(start, e)
+        return if (start == 0 && end == pcm.size) pcm else pcm.copyOfRange(start, end)
     }
 
     // --- consumer: play the queue strictly in order, tied to the highlight ---
@@ -331,13 +345,22 @@ class OnDeviceTtsEngine(
             if (!running) return
             val pcm = item.pcm
             if (!item.cancelled && !item.failed && pcm != null) {
-                onAudibleLine?.invoke(item.line) // highlight exactly when audio starts
+                val next: TTSHelper.TTSLine? = synchronized(lock) { queue.getOrNull(playPos + 1)?.line }
+                onAudibleLine?.invoke(item.line, next) // highlight + notification, audio-synced
                 val t = track
                 var off = 0
                 while (running && !item.cancelled && t != null && off < pcm.size) {
                     val n = t.write(pcm, off, minOf(WRITE_CHUNK, pcm.size - off), AudioTrack.WRITE_BLOCKING)
                     if (n <= 0) break
                     off += n
+                }
+                // configurable inter-sentence gap: write gapMs of silence before the next sentence
+                var gap = (sampleRate.toLong() * gapMs / 1000L).toInt()
+                while (running && !item.cancelled && t != null && gap > 0) {
+                    val w = minOf(silenceChunk.size, gap)
+                    val n = t.write(silenceChunk, 0, w, AudioTrack.WRITE_BLOCKING)
+                    if (n <= 0) break
+                    gap -= n
                 }
             }
             if (!item.cancelled) endSeq = maxOf(endSeq, item.seq)
@@ -362,6 +385,6 @@ class OnDeviceTtsEngine(
         private const val WRITE_CHUNK = 4096
         private const val DUCK_VOLUME = 0.3f
         private const val SILENCE_THRESHOLD = 0.01f
-        private const val INTER_SENTENCE_PAD_SEC = 0.06f
+        private const val MAX_GAP_MS = 2000
     }
 }

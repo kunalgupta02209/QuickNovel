@@ -34,7 +34,6 @@ import com.lagradost.quicknovel.ui.img
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
 import com.lagradost.quicknovel.util.UIHelper.getShowCovers
-import com.lagradost.quicknovel.util.UIHelper.setShowCovers
 import androidx.preference.PreferenceManager
 import kotlinx.coroutines.launch
 
@@ -175,7 +174,6 @@ class DownloadFragment : BaseFragment<FragmentDownloadsBinding>(
             val newValue = !getShowCovers(ctx)
             PreferenceManager.getDefaultSharedPreferences(ctx).edit()
                 .putBoolean(getString(R.string.show_covers_key), newValue).apply()
-            setShowCovers(newValue)
             updateCoverToggleIcon()
             // rebind visible library cards so the change is immediate
             (binding.viewpager.adapter as? ViewpagerAdapter)?.notifyDataSetChanged()

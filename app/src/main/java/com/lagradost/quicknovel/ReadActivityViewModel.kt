@@ -1375,8 +1375,11 @@ class ReadActivityViewModel : ViewModel() {
                     modelDownloads(context).isReady(ttsOnDeviceModel)
             val langOk = onDeviceLanguageOk()
             ttsSession = if (modelReady && langOk) {
-                OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ::parseAction).also {
-                    it.onAudibleLine = { line -> _ttsLine.postValue(line) }
+                OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ttsGapMs, ::parseAction).also { engine ->
+                    engine.onAudibleLine = { current, next ->
+                        _ttsLine.postValue(current)
+                        TTSNotifications.updateNowPlaying(current.speakOutMsg, next?.speakOutMsg, currentTTSStatus, context)
+                    }
                 }
             } else {
                 if (ttsEngineType == TtsEngineType.ON_DEVICE) {
@@ -1590,17 +1593,17 @@ class ReadActivityViewModel : ViewModel() {
                         }
 
 
-                        // post visual (on-device engines post the audible line themselves, audio-synced)
-                        if (ttsSession.drivesOwnHighlight != true) _ttsLine.postValue(line)
-
-                        // update the media notification with the current + upcoming line text
-                        // (metadata-only on 13+ so the system media UI animates the change itself)
-                        TTSNotifications.updateNowPlaying(
-                            line.speakOutMsg,
-                            nextLine?.speakOutMsg,
-                            currentTTSStatus,
-                            context
-                        )
+                        // On-device engines post the audible line themselves (highlight + notification,
+                        // audio-synced). The system engine posts it here at enqueue time.
+                        if (ttsSession.drivesOwnHighlight != true) {
+                            _ttsLine.postValue(line)
+                            TTSNotifications.updateNowPlaying(
+                                line.speakOutMsg,
+                                nextLine?.speakOutMsg,
+                                currentTTSStatus,
+                                context
+                            )
+                        }
 
                         // wait for next line
                         // Feed a look-ahead window so an on-device engine can pre-render ahead
@@ -1891,6 +1894,14 @@ class ReadActivityViewModel : ViewModel() {
         set(value) {
             ttsLookaheadKey = value.coerceIn(1, 6)
             (ttsSession as? OnDeviceTtsEngine)?.updateLookahead(ttsLookaheadKey)
+        }
+    // Inter-sentence gap (ms) for the on-device engine, applied live.
+    private var ttsGapKey by PreferenceDelegate(EPUB_TTS_OD_GAP, 150, Int::class)
+    var ttsGapMs: Int
+        get() = ttsGapKey
+        set(value) {
+            ttsGapKey = value.coerceIn(0, 2000)
+            (ttsSession as? OnDeviceTtsEngine)?.updateGapMs(ttsGapKey)
         }
 
     private var _modelDownloads: ModelDownloadManager? = null

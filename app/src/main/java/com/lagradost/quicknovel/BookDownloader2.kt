@@ -941,7 +941,9 @@ object NotificationHelper {
         }
 
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && posterUrl != null) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && posterUrl != null &&
+            com.lagradost.quicknovel.util.UIHelper.getShowCovers(context)
+        ) {
             context.getImageBitmapFromUrl(posterUrl)?.let { builder.setLargeIcon(it) }
         }
 

@@ -79,22 +79,12 @@ fun Long.divCeil(other: Long): Long {
 }
 
 object UIHelper {
-    // App-wide "show book covers" toggle. Cached so we don't hit SharedPreferences on every bind
-    // during scroll; kept in sync by setShowCovers when the user flips the toggle.
-    @Volatile
-    private var showCoversCache: Boolean? = null
-
-    /** Whether book covers should be displayed anywhere in the app (default true). */
-    fun getShowCovers(context: Context): Boolean {
-        return showCoversCache ?: PreferenceManager.getDefaultSharedPreferences(context)
+    /** Whether book covers should be displayed anywhere in the app (default true). Read directly from
+     *  preferences (a fast in-memory lookup) so both the library toggle and the Settings toggle take
+     *  effect immediately. Gates covers app-wide: search, library, result, and notifications. */
+    fun getShowCovers(context: Context): Boolean =
+        PreferenceManager.getDefaultSharedPreferences(context)
             .getBoolean(context.getString(R.string.show_covers_key), true)
-            .also { showCoversCache = it }
-    }
-
-    /** Update the cached toggle value (caller is responsible for persisting to preferences). */
-    fun setShowCovers(value: Boolean) {
-        showCoversCache = value
-    }
 
     fun String?.html(): Spanned {
         return getHtmlText(this?.trim()?.replace("\n", "<br>") ?: return "".toSpanned())

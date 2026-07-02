@@ -517,6 +517,9 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsBufferSlider.value = viewModel.ttsLookahead.coerceIn(1, 6).toFloat()
         b.ttsBufferSlider.addOnChangeListener { _, value, _ -> viewModel.ttsLookahead = value.toInt() }
 
+        b.ttsGapSlider.value = viewModel.ttsGapMs.coerceIn(0, 1000).toFloat()
+        b.ttsGapSlider.addOnChangeListener { _, value, _ -> viewModel.ttsGapMs = value.toInt() }
+
         b.ttsSettingsDone.setOnClickListener { dialog.dismiss() }
         refreshEngine()
         dialog.show()

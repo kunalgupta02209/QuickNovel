@@ -20,6 +20,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.media.session.MediaButtonReceiver
 import androidx.preference.PreferenceManager
 import com.lagradost.quicknovel.mvvm.logError
+import com.lagradost.quicknovel.util.UIHelper.getShowCovers
 
 object TTSNotifications {
     // Bumped from the original "QuickNovelTTS" (IMPORTANCE_DEFAULT) so the new silent
@@ -38,10 +39,12 @@ object TTSNotifications {
     private var lineText: String = ""
     private var upcomingText: String? = null
 
-    /** User setting: whether to show the novel cover in the read-aloud notification / media controls. */
+    /** Show the novel cover in the read-aloud notification only if BOTH the app-wide "show covers"
+     *  toggle and the read-aloud-notification-specific toggle are on. */
     private fun showCoverEnabled(context: Context): Boolean =
-        PreferenceManager.getDefaultSharedPreferences(context)
-            .getBoolean(context.getString(R.string.tts_show_cover_key), true)
+        getShowCovers(context) &&
+                PreferenceManager.getDefaultSharedPreferences(context)
+                    .getBoolean(context.getString(R.string.tts_show_cover_key), true)
 
     /** Recompute the effective [poster] from the setting so the toggle takes effect live. */
     private fun refreshCover(context: Context?) {

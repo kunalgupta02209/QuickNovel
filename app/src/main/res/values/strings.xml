@@ -43,6 +43,7 @@
     <string name="download_format_key">download_format</string>
     <string name="show_covers_key">show_covers</string>
     <string name="show_covers">Show book covers</string>
+    <string name="show_covers_desc">Show cover art everywhere — search, library, and notifications</string>
     <string name="hide_covers">Hide book covers</string>
     <string name="tts_show_cover_key">tts_show_cover</string>
     <string name="tts_show_cover">Show cover in read-aloud notification</string>
@@ -190,6 +191,7 @@
     <string name="tts_engine_on_device">On-device (neural)</string>
     <string name="tts_model">Voice model</string>
     <string name="tts_buffer_sentences">Sentences to buffer</string>
+    <string name="tts_sentence_gap">Gap between sentences (ms)</string>
     <string name="tts_download_model">Download voice model</string>
     <string name="tts_delete_model">Delete model</string>
     <string name="tts_model_not_downloaded">Download an on-device voice model first</string>
