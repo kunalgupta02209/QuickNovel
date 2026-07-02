@@ -128,8 +128,10 @@ class OnDeviceTtsEngine(
         val minBuf = AudioTrack.getMinBufferSize(
             sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
         ).coerceAtLeast(4096)
-        // ~0.25 s of headroom (float mono: sampleRate*4 bytes = 1 s) so a flush() on skip re-primes fast.
-        val bufBytes = maxOf(minBuf, sampleRate)
+        // ~0.5 s of headroom (float mono: sampleRate*4 bytes = 1 s). A larger track buffer rides out
+        // audio-HAL stalls (esp. the emulator, which underruns/glitches easily) at the cost of a
+        // little highlight lead. Synthesis is far faster than real-time so PCM is always ready.
+        val bufBytes = maxOf(minBuf, sampleRate * 2)
         track = try {
             AudioTrack.Builder()
                 .setAudioAttributes(
