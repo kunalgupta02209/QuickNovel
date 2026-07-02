@@ -1867,9 +1867,31 @@ class ReadActivityViewModel : ViewModel() {
             ttsEngineInternal = value.prefValue
             recreateTtsEngine()
         }
-    var ttsOnDeviceModel by PreferenceDelegate(EPUB_TTS_OD_MODEL, "kitten", String::class)
-    var ttsOnDeviceVoice by PreferenceDelegate(EPUB_TTS_OD_VOICE, "", String::class)
-    var ttsLookahead by PreferenceDelegate(EPUB_TTS_OD_BUFFER, 3, Int::class)
+    // Changing model/voice must rebuild the engine (it captures the model + speaker at construction).
+    private var ttsOnDeviceModelKey by PreferenceDelegate(EPUB_TTS_OD_MODEL, "kitten", String::class)
+    var ttsOnDeviceModel: String
+        get() = ttsOnDeviceModelKey
+        set(value) {
+            if (value == ttsOnDeviceModelKey) return
+            ttsOnDeviceModelKey = value
+            if (ttsEngineType == TtsEngineType.ON_DEVICE) recreateTtsEngine()
+        }
+    private var ttsOnDeviceVoiceKey by PreferenceDelegate(EPUB_TTS_OD_VOICE, "", String::class)
+    var ttsOnDeviceVoice: String
+        get() = ttsOnDeviceVoiceKey
+        set(value) {
+            if (value == ttsOnDeviceVoiceKey) return
+            ttsOnDeviceVoiceKey = value
+            if (ttsEngineType == TtsEngineType.ON_DEVICE) recreateTtsEngine()
+        }
+    // Buffer depth applies live to the running engine (no rebuild).
+    private var ttsLookaheadKey by PreferenceDelegate(EPUB_TTS_OD_BUFFER, 3, Int::class)
+    var ttsLookahead: Int
+        get() = ttsLookaheadKey
+        set(value) {
+            ttsLookaheadKey = value.coerceIn(1, 6)
+            (ttsSession as? OnDeviceTtsEngine)?.updateLookahead(ttsLookaheadKey)
+        }
 
     private var _modelDownloads: ModelDownloadManager? = null
     fun modelDownloads(context: Context): ModelDownloadManager =

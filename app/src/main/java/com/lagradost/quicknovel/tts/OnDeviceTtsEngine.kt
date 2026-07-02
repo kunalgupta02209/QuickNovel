@@ -8,6 +8,7 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
+import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.lagradost.quicknovel.TTSHelper
 import com.lagradost.quicknovel.mvvm.logError
@@ -193,6 +194,9 @@ class OnDeviceTtsEngine(
 
     override fun setPitch(pitch: Float) { /* neural models have no pitch control */ }
 
+    /** Live buffer-depth change (no rebuild needed). */
+    fun updateLookahead(n: Int) { lookahead = n.coerceIn(1, MAX_LOOKAHEAD) }
+
     private fun applySpeed(t: AudioTrack) {
         runCatching {
             val p = t.playbackParams
@@ -285,6 +289,7 @@ class OnDeviceTtsEngine(
             chunks.add(c); total += c.size
             1
         }
+        val t0 = System.currentTimeMillis()
         try {
             val gen = TtsModels.resolveGenerationConfig(appContext, def, sid, 1.0f)
             if (gen != null) {
@@ -299,14 +304,37 @@ class OnDeviceTtsEngine(
             return
         }
         if (slot.cancelled) return
-        val out = FloatArray(total)
+        val raw = FloatArray(total)
         var o = 0
-        for (c in chunks) { System.arraycopy(c, 0, out, o, c.size); o += c.size }
+        for (c in chunks) { System.arraycopy(c, 0, raw, o, c.size); o += c.size }
+        val out = trimSilence(raw)
+        val synthMs = System.currentTimeMillis() - t0
+        val audioMs = if (sampleRate > 0) out.size * 1000L / sampleRate else 0L
+        // rtf > 1.0 means synthesis is SLOWER than real-time → buffer can't fully hide the gap.
+        Log.d(
+            TAG,
+            "render sid=$sid synth=${synthMs}ms audio=${audioMs}ms rtf=" +
+                    (if (audioMs > 0) "%.2f".format(synthMs.toFloat() / audioMs) else "?")
+        )
         synchronized(lock) {
             slot.pcm = out
             slot.rendered = true
             lock.notifyAll()
         }
+    }
+
+    /** Trim leading/trailing near-silence the model bakes into each sentence (a big inter-sentence
+     *  gap source), keeping a short consistent tail so sentences don't run together unnaturally. */
+    private fun trimSilence(pcm: FloatArray): FloatArray {
+        if (pcm.isEmpty()) return pcm
+        var start = 0
+        while (start < pcm.size && kotlin.math.abs(pcm[start]) < SILENCE_THRESHOLD) start++
+        var end = pcm.size
+        while (end > start && kotlin.math.abs(pcm[end - 1]) < SILENCE_THRESHOLD) end--
+        if (start >= end) return FloatArray(0)
+        val pad = (sampleRate * INTER_SENTENCE_PAD_SEC).toInt()
+        val e = minOf(pcm.size, end + pad)
+        return if (start == 0 && e == pcm.size) pcm else pcm.copyOfRange(start, e)
     }
 
     // ---- consumer: play rendered slots back-to-back into the never-stopped track ----
@@ -347,9 +375,12 @@ class OnDeviceTtsEngine(
     }
 
     companion object {
+        private const val TAG = "OnDeviceTts"
         private const val BEHIND = 2
         private const val MAX_LOOKAHEAD = 6
         private const val WRITE_CHUNK = 4096 // floats per AudioTrack.write
         private const val DUCK_VOLUME = 0.3f // volume while ducking under a transient focus loss
+        private const val SILENCE_THRESHOLD = 0.01f // |sample| below this counts as silence (~ -40 dB)
+        private const val INTER_SENTENCE_PAD_SEC = 0.06f // natural gap kept after trimming
     }
 }
