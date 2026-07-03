@@ -2,10 +2,14 @@ package com.lagradost.quicknovel.tts
 
 import android.content.Context
 import com.lagradost.quicknovel.AbstractBook
+import com.lagradost.quicknovel.BaseApplication.Companion.getKey
+import com.lagradost.quicknovel.BaseApplication.Companion.getKeys
 import com.lagradost.quicknovel.BookDownloader2Helper
+import com.lagradost.quicknovel.DOWNLOAD_FOLDER
 import com.lagradost.quicknovel.QuickBook
 import com.lagradost.quicknovel.TTSHelper
 import com.lagradost.quicknovel.mvvm.logError
+import com.lagradost.quicknovel.ui.download.DownloadFragment
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -27,14 +31,42 @@ object TtsAudioCache {
 
     // ---- identity ----
 
-    /** "b<generateId>" for downloaded stream books, "h<hash>" for imported EPUBs. */
+    /**
+     * Cache identity for a book. Downloaded stream books (QuickBook) use the download identity
+     * "b<generateId(apiName,author,name)>". An EPUB opened in the reader (RegularBook) has no
+     * provider name, so we match it back to a downloaded book by title (+author) and reuse that
+     * download identity — this is what lets pre-generated audio be reused when reading the EPUB, not
+     * just when stream-reading. Falls back to a title hash when there is no matching download.
+     */
     fun bookIdFor(book: AbstractBook): String = when (book) {
         is QuickBook -> quickBookId(book.data.meta.apiName, book.data.meta.author, book.data.meta.name)
-        else -> "h" + book.title().hashCode()
+        else -> resolveDownloadedBookId(book) ?: ("h" + book.title().hashCode())
     }
 
     fun quickBookId(apiName: String, author: String?, name: String): String =
         "b" + BookDownloader2Helper.generateId(apiName, author, name)
+
+    /**
+     * Match an EPUB/imported book back to a downloaded book by name (and author when available), so
+     * its cache id equals the download identity the pre-generator used. Prefers a name+author match;
+     * falls back to name-only. Runs once per playback start, so a linear scan of the library is fine.
+     */
+    private fun resolveDownloadedBookId(book: AbstractBook): String? {
+        val title = book.title().trim()
+        if (title.isBlank()) return null
+        val author = book.author()?.trim()?.takeIf { it.isNotBlank() }
+        val keys = getKeys(DOWNLOAD_FOLDER) ?: return null
+        var titleOnlyMatch: DownloadFragment.DownloadData? = null
+        for (key in keys) {
+            val d = runCatching { getKey<DownloadFragment.DownloadData>(key) }.getOrNull() ?: continue
+            if (!d.name.trim().equals(title, ignoreCase = true)) continue
+            if (author != null && d.author?.trim()?.equals(author, ignoreCase = true) == true) {
+                return quickBookId(d.apiName, d.author, d.name) // best: name + author
+            }
+            if (titleOnlyMatch == null) titleOnlyMatch = d
+        }
+        return titleOnlyMatch?.let { quickBookId(it.apiName, it.author, it.name) }
+    }
 
     // ---- paths ----
 
