@@ -1,0 +1,135 @@
+package com.lagradost.quicknovel.tts
+
+import android.content.Context
+import com.lagradost.quicknovel.AbstractBook
+import com.lagradost.quicknovel.BookDownloader2Helper
+import com.lagradost.quicknovel.QuickBook
+import com.lagradost.quicknovel.TTSHelper
+import com.lagradost.quicknovel.mvvm.logError
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.security.MessageDigest
+
+/**
+ * On-disk cache of synthesized on-device TTS audio, shared by the live reader engine
+ * ([OnDeviceTtsEngine]) as a read-through/write-through cache AND by the background pre-generator
+ * ([TtsChapterSynthesizer]). Sole owner of the cache format so the two producers can never disagree.
+ *
+ * Layout: filesDir/tts-cache/<bookId>/<modelId>/s<sid>/c<chapterIndex>/<sha1(speakOutMsg)[:24]>.wav
+ * Files are TRIMMED 16-bit PCM mono WAV. The key excludes speed/pitch/gap (applied at playback), so
+ * cached audio is reusable across every playback setting.
+ */
+object TtsAudioCache {
+    private const val ROOT = "tts-cache"
+    const val SILENCE_THRESHOLD = 0.01f // identical to the live engine's trim
+
+    // ---- identity ----
+
+    /** "b<generateId>" for downloaded stream books, "h<hash>" for imported EPUBs. */
+    fun bookIdFor(book: AbstractBook): String = when (book) {
+        is QuickBook -> quickBookId(book.data.meta.apiName, book.data.meta.author, book.data.meta.name)
+        else -> "h" + book.title().hashCode()
+    }
+
+    fun quickBookId(apiName: String, author: String?, name: String): String =
+        "b" + BookDownloader2Helper.generateId(apiName, author, name)
+
+    // ---- paths ----
+
+    private fun root(ctx: Context): File = File(ctx.filesDir, ROOT)
+    fun bookDir(ctx: Context, bookId: String): File = File(root(ctx), bookId)
+
+    fun chapterDir(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int): File =
+        File(bookDir(ctx, bookId), "$modelId/s$sid/c$chapterIndex")
+
+    fun fileFor(ctx: Context, bookId: String, modelId: String, sid: Int, line: TTSHelper.TTSLine): File =
+        File(chapterDir(ctx, bookId, modelId, sid, line.index), sha1Hex(line.speakOutMsg).take(24) + ".wav")
+
+    private fun sha1Hex(s: String): String =
+        MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    // ---- trim (moved from OnDeviceTtsEngine so cache == live audio) ----
+
+    fun trimSilence(pcm: FloatArray): FloatArray {
+        if (pcm.isEmpty()) return pcm
+        var start = 0
+        while (start < pcm.size && kotlin.math.abs(pcm[start]) < SILENCE_THRESHOLD) start++
+        var end = pcm.size
+        while (end > start && kotlin.math.abs(pcm[end - 1]) < SILENCE_THRESHOLD) end--
+        if (start >= end) return FloatArray(0)
+        return if (start == 0 && end == pcm.size) pcm else pcm.copyOfRange(start, end)
+    }
+
+    // ---- WAV round-trip (16-bit PCM mono; our own fixed 44-byte header) ----
+
+    fun save(dest: File, trimmed: FloatArray, sampleRate: Int): Boolean = runCatching {
+        dest.parentFile?.mkdirs()
+        val dataSize = trimmed.size * 2
+        val bb = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN)
+        bb.put("RIFF".toByteArray(Charsets.US_ASCII)); bb.putInt(36 + dataSize)
+        bb.put("WAVE".toByteArray(Charsets.US_ASCII))
+        bb.put("fmt ".toByteArray(Charsets.US_ASCII)); bb.putInt(16)
+        bb.putShort(1); bb.putShort(1); bb.putInt(sampleRate)
+        bb.putInt(sampleRate * 2); bb.putShort(2); bb.putShort(16)
+        bb.put("data".toByteArray(Charsets.US_ASCII)); bb.putInt(dataSize)
+        for (s in trimmed) bb.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
+        val tmp = File(dest.parentFile, dest.name + ".part")
+        FileOutputStream(tmp).use { it.write(bb.array()) }
+        tmp.renameTo(dest) // atomic-ish: never leave a half-written .wav
+    }.getOrElse { logError(it); false }
+
+    fun load(src: File): FloatArray? = runCatching {
+        val bytes = src.readBytes()
+        if (bytes.size <= 44) return@runCatching null
+        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val dataSize = bb.getInt(40)
+        val n = minOf(dataSize, bytes.size - 44) / 2
+        val out = FloatArray(n)
+        bb.position(44)
+        for (i in 0 until n) out[i] = bb.short / 32768f
+        out
+    }.getOrNull()
+
+    // ---- chapter completion + metrics ----
+
+    private fun doneMarker(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int): File =
+        File(chapterDir(ctx, bookId, modelId, sid, chapterIndex), ".done")
+
+    fun markChapterDone(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int) {
+        runCatching { doneMarker(ctx, bookId, modelId, sid, chapterIndex).writeText("ok") }
+    }
+
+    fun isChapterDone(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int): Boolean =
+        doneMarker(ctx, bookId, modelId, sid, chapterIndex).exists()
+
+    private fun dirBytes(dir: File): Long =
+        if (!dir.exists()) 0L else dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    fun voiceBytes(ctx: Context, bookId: String, modelId: String, sid: Int): Long =
+        dirBytes(File(bookDir(ctx, bookId), "$modelId/s$sid"))
+
+    /** Number of chapters with a .done marker under this voice. */
+    fun doneChapterCount(ctx: Context, bookId: String, modelId: String, sid: Int): Int {
+        val voiceDir = File(bookDir(ctx, bookId), "$modelId/s$sid")
+        if (!voiceDir.isDirectory) return 0
+        return voiceDir.listFiles { f -> f.isDirectory && f.name.startsWith("c") }
+            ?.count { File(it, ".done").exists() } ?: 0
+    }
+
+    // ---- deletion ----
+
+    fun deleteChapter(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int) {
+        runCatching { chapterDir(ctx, bookId, modelId, sid, chapterIndex).deleteRecursively() }
+    }
+
+    fun deleteVoice(ctx: Context, bookId: String, modelId: String, sid: Int) {
+        runCatching { File(bookDir(ctx, bookId), "$modelId/s$sid").deleteRecursively() }
+    }
+
+    fun deleteBook(ctx: Context, bookId: String) {
+        runCatching { bookDir(ctx, bookId).deleteRecursively() }
+    }
+}

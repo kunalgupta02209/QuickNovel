@@ -52,6 +52,7 @@ import com.lagradost.quicknovel.mvvm.Resource
 import com.lagradost.quicknovel.mvvm.letInner
 import com.lagradost.quicknovel.tts.ModelDownloadManager
 import com.lagradost.quicknovel.tts.OnDeviceTtsEngine
+import com.lagradost.quicknovel.tts.TtsAudioCache
 import com.lagradost.quicknovel.tts.TtsEngine
 import com.lagradost.quicknovel.tts.TtsModels
 import com.lagradost.quicknovel.ui.TtsEngineType
@@ -1376,6 +1377,7 @@ class ReadActivityViewModel : ViewModel() {
             val langOk = onDeviceLanguageOk()
             ttsSession = if (modelReady && langOk) {
                 OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ttsGapMs, ::parseAction).also { engine ->
+                    engine.cacheBookId = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
                         TTSNotifications.updateNowPlaying(current.speakOutMsg, next?.speakOutMsg, currentTTSStatus, context)

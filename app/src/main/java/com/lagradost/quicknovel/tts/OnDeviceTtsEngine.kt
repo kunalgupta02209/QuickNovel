@@ -56,6 +56,10 @@ class OnDeviceTtsEngine(
      *  highlight AND the media-notification now-playing text, audio-synced. */
     var onAudibleLine: ((TTSHelper.TTSLine, TTSHelper.TTSLine?) -> Unit)? = null
 
+    /** When non-null, [render] reads/writes a per-sentence disk cache under this book id, so
+     *  re-listening and background pre-generation share byte-identical audio (see [TtsAudioCache]). */
+    @Volatile var cacheBookId: String? = null
+
     override val supportsPitch: Boolean get() = true
     override val supportsSystemLanguagePicker: Boolean get() = false
     override val drivesOwnHighlight: Boolean get() = true
@@ -287,6 +291,14 @@ class OnDeviceTtsEngine(
 
     private fun render(item: Item) {
         val engine = tts ?: run { item.failed = true; return }
+
+        // READ-THROUGH: a cache hit is a ~ms disk read instead of real-time synthesis.
+        val cacheFile = cacheBookId?.let { TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line) }
+        if (cacheFile != null && cacheFile.exists()) {
+            val cached = TtsAudioCache.load(cacheFile)
+            if (cached != null) { synchronized(lock) { item.pcm = cached; lock.notifyAll() }; return }
+        }
+
         val chunks = ArrayList<FloatArray>()
         var total = 0
         val sink: (FloatArray) -> Int = cb@{ samples ->
@@ -309,25 +321,14 @@ class OnDeviceTtsEngine(
         val raw = FloatArray(total)
         var o = 0
         for (c in chunks) { System.arraycopy(c, 0, raw, o, c.size); o += c.size }
-        val out = trimSilence(raw)
+        val out = TtsAudioCache.trimSilence(raw)
+        // WRITE-THROUGH: populate the cache so re-listen / pre-generation share byte-identical audio.
+        if (cacheFile != null) runCatching { TtsAudioCache.save(cacheFile, out, sampleRate) }
         val synthMs = System.currentTimeMillis() - t0
         val audioMs = if (sampleRate > 0) out.size * 1000L / sampleRate else 0L
         Log.d(TAG, "render sid=$sid synth=${synthMs}ms audio=${audioMs}ms rtf=" +
                 (if (audioMs > 0) "%.2f".format(synthMs.toFloat() / audioMs) else "?"))
         synchronized(lock) { item.pcm = out; lock.notifyAll() }
-    }
-
-    /** Trim leading/trailing near-silence the model bakes into each sentence, so the audible gap is
-     *  exactly the user's configured [gapMs] (written as silence between sentences), not the model's
-     *  variable padding. */
-    private fun trimSilence(pcm: FloatArray): FloatArray {
-        if (pcm.isEmpty()) return pcm
-        var start = 0
-        while (start < pcm.size && kotlin.math.abs(pcm[start]) < SILENCE_THRESHOLD) start++
-        var end = pcm.size
-        while (end > start && kotlin.math.abs(pcm[end - 1]) < SILENCE_THRESHOLD) end--
-        if (start >= end) return FloatArray(0)
-        return if (start == 0 && end == pcm.size) pcm else pcm.copyOfRange(start, end)
     }
 
     // --- consumer: play the queue strictly in order, tied to the highlight ---
@@ -384,7 +385,6 @@ class OnDeviceTtsEngine(
         private const val MAX_LOOKAHEAD = 6
         private const val WRITE_CHUNK = 4096
         private const val DUCK_VOLUME = 0.3f
-        private const val SILENCE_THRESHOLD = 0.01f
         private const val MAX_GAP_MS = 2000
     }
 }
