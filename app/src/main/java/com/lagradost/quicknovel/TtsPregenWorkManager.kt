@@ -34,7 +34,9 @@ class TtsPregenWorkManager(context: Context, params: WorkerParameters) :
         fun enqueue(context: Context, req: TtsPregenManager.PregenRequest) {
             DownloadFileWorkManager.getWorkerManager(context).enqueueUniqueWork(
                 ID_PREGEN,
-                ExistingWorkPolicy.APPEND,
+                // APPEND_OR_REPLACE (not APPEND): if a prior job FAILED/was cancelled, APPEND would
+                // leave the new work blocked on the dead predecessor — replace the chain instead.
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 OneTimeWorkRequest.Builder(TtsPregenWorkManager::class.java)
                     .setInputData(
                         Data.Builder().putString(ID, ID_PREGEN).putInt(DATA, insertWork(req)).build()

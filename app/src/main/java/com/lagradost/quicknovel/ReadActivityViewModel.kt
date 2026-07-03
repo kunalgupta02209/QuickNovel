@@ -1481,6 +1481,10 @@ class ReadActivityViewModel : ViewModel() {
                 ttsSession.register()
                 ttsSession.setSpeed(ttsSpeed)
                 ttsSession.setPitch(ttsPitch)
+                // Bind the audio cache to this book now that it's guaranteed loaded (the engine may
+                // have been built during reader init before `book` was set, leaving cacheBookId null).
+                (ttsSession as? OnDeviceTtsEngine)?.cacheBookId =
+                    runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
 
                 var ttsInnerIndex = 0 // this inner index is different from what is set
                 var index = dIndex.index

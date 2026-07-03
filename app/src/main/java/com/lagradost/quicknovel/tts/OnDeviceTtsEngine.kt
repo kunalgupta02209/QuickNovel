@@ -296,7 +296,11 @@ class OnDeviceTtsEngine(
         val cacheFile = cacheBookId?.let { TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line) }
         if (cacheFile != null && cacheFile.exists()) {
             val cached = TtsAudioCache.load(cacheFile)
-            if (cached != null) { synchronized(lock) { item.pcm = cached; lock.notifyAll() }; return }
+            if (cached != null) {
+                Log.d(TAG, "render CACHE HIT sid=$sid samples=${cached.size}")
+                synchronized(lock) { item.pcm = cached; lock.notifyAll() }
+                return
+            }
         }
 
         val chunks = ArrayList<FloatArray>()
