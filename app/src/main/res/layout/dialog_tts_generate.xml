@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/primaryGrayBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/tts_pregen_title"
+            android:textColor="?attr/textColor"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- ===== Generate new ===== -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/tts_pregen_book"
+            android:textColor="?attr/textColor"
+            android:textSize="15sp" />
+
+        <Spinner
+            android:id="@+id/tts_gen_book"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/tts_gen_range_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/tts_pregen_range"
+            android:textColor="?attr/textColor"
+            android:textSize="15sp" />
+
+        <com.google.android.material.slider.RangeSlider
+            android:id="@+id/tts_gen_range"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:stepSize="1"
+            android:valueFrom="1"
+            android:valueTo="2" />
+
+        <TextView
+            android:id="@+id/tts_gen_voice_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="?attr/textColor"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tts_gen_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/tts_pregen_model_not_ready"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tts_gen_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="@string/tts_pregen_start" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:background="?attr/textColor"
+            android:alpha="0.15" />
+
+        <!-- ===== Manage existing (all ebooks) ===== -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/tts_pregen_existing"
+            android:textColor="?attr/textColor"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tts_gen_empty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/tts_pregen_empty"
+            android:textColor="?attr/textColor"
+            android:alpha="0.6"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/tts_gen_records"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

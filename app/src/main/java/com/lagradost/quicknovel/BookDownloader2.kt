@@ -526,6 +526,27 @@ object BookDownloader2Helper {
         return getChapter(path, index, getStripHtml(), false)
     }
 
+    /**
+     * Offline read of an already-downloaded chapter's title + html by (apiName, author, name, index),
+     * with no network access. Returns null if the chapter file is not on disk. Mirrors
+     * [getQuickChapter]'s path + strip settings so the text matches the reader exactly (important for
+     * the TTS audio-cache content-hash to line up).
+     */
+    fun Context.readDownloadedChapter(
+        apiName: String,
+        author: String?,
+        name: String,
+        index: Int
+    ): LoadedChapter? {
+        val path = filesDir.toString() + getFilename(
+            sanitizeFilename(apiName),
+            if (author == null) "" else sanitizeFilename(author),
+            sanitizeFilename(name),
+            index
+        )
+        return getChapter(path, index, getStripHtml(), false)
+    }
+
     @WorkerThread
     fun Activity.createQuickStream(data: QuickStreamData): Uri? {
         try {

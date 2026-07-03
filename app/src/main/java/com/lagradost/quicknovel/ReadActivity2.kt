@@ -520,6 +520,10 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsGapSlider.value = viewModel.ttsGapMs.coerceIn(0, 1000).toFloat()
         b.ttsGapSlider.addOnChangeListener { _, value, _ -> viewModel.ttsGapMs = value.toInt() }
 
+        b.ttsPregenButton.setOnClickListener {
+            com.lagradost.quicknovel.ui.tts.TtsGenerateDialog.show(this@ReadActivity2)
+        }
+
         b.ttsSettingsDone.setOnClickListener { dialog.dismiss() }
         refreshEngine()
         dialog.show()

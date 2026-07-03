@@ -130,6 +130,15 @@
                 android:value="150"
                 android:valueFrom="0"
                 android:valueTo="1000" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/tts_pregen_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="@string/tts_pregen_manage"
+                app:icon="@drawable/ic_baseline_record_voice_over_24"
+                app:iconGravity="textStart" />
         </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
