@@ -89,17 +89,35 @@ object LlmFixDialog {
             viewModel.llmPrevChapters = b.llmPrevSlider.value.toInt()
         }
 
-        // ---- fix this chapter (foreground, minutes on mid-range) ----
+        // ---- fix this chapter (foreground; the button toggles to Cancel while running) ----
+        var fixJob: kotlinx.coroutines.Job? = null
+        fun resetFixButton() {
+            fixJob = null
+            b.llmFixChapter.setText(R.string.llm_fix_this_chapter)
+            b.llmFixChapter.isEnabled = true
+            b.llmFixWhole.isEnabled = true
+            b.llmBuildGraph.isEnabled = true
+            b.llmStatus.visibility = View.GONE
+            b.llmStreamScroll.visibility = View.GONE
+        }
         b.llmFixChapter.setOnClickListener {
+            if (fixJob != null) {
+                // Running -> cancel the coroutine AND interrupt the native generation.
+                fixJob?.cancel()
+                com.lagradost.quicknovel.llm.ChapterFixer.stopGeneration()
+                resetFixButton()
+                return@setOnClickListener
+            }
             if (!LlmModels.isReady(activity, def)) {
                 Toast.makeText(activity, R.string.llm_model_not_ready, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             persistSettings()
-            b.llmFixChapter.isEnabled = false
             b.llmFixWhole.isEnabled = false
+            b.llmBuildGraph.isEnabled = false
             b.llmStatus.visibility = View.VISIBLE
-            viewModel.fixCurrentChapter(
+            b.llmFixChapter.setText(R.string.llm_fix_cancel)
+            fixJob = viewModel.fixCurrentChapter(
                 activity,
                 onState = { s -> activity.runOnUiThread { b.llmStatus.text = s } },
                 onStream = { info, text ->
@@ -112,16 +130,14 @@ object LlmFixDialog {
                 },
                 onDone = { ok ->
                     activity.runOnUiThread {
+                        if (fixJob == null) return@runOnUiThread // already cancelled by the user
+                        resetFixButton()
                         Toast.makeText(
                             activity,
                             if (ok) R.string.llm_fixed_done else R.string.llm_fix_failed,
-                            Toast.LENGTH_SHORT
+                            Toast.LENGTH_SHORT,
                         ).show()
                         if (ok) dialog.dismiss()
-                        else {
-                            b.llmFixChapter.isEnabled = true; b.llmFixWhole.isEnabled = true
-                            b.llmStatus.visibility = View.GONE
-                        }
                     }
                 },
             )

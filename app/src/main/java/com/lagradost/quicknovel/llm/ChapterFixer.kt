@@ -42,6 +42,11 @@ object ChapterFixer {
         engine?.close(); engine = null; engineModelId = null
     }
 
+    /** Interrupt the in-flight generation (used to cancel an on-the-spot fix). */
+    fun stopGeneration() {
+        runCatching { engine?.stop() }
+    }
+
     data class FixConfig(
         val modelId: String,
         val promptVersion: Int,

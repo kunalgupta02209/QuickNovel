@@ -523,6 +523,14 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsEnhanceSwitch.isChecked = viewModel.ttsEnhance
         b.ttsEnhanceSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsEnhance = on }
 
+        b.ttsDenoiseSwitch.isChecked = viewModel.ttsDenoise
+        b.ttsDenoiseSwitch.setOnCheckedChangeListener { _, on ->
+            viewModel.ttsDenoise = on
+            if (on && !com.lagradost.quicknovel.tts.TtsDenoiser.isReady(this@ReadActivity2)) {
+                android.widget.Toast.makeText(this@ReadActivity2, R.string.tts_denoise_downloading, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+
         b.ttsPregenButton.setOnClickListener {
             com.lagradost.quicknovel.ui.tts.TtsGenerateDialog.show(this@ReadActivity2)
         }

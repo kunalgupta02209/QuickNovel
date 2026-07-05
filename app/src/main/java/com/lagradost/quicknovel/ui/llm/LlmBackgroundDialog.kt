@@ -92,12 +92,15 @@ object LlmBackgroundDialog {
 
         val onRec: (Pair<String, LlmFixManager.LlmFixRecord>) -> Unit = { b.root.post { renderRecords(ctx, b) } }
         val onRem: (String) -> Unit = { b.root.post { renderRecords(ctx, b) } }
+        val onProg: (Pair<String, com.lagradost.quicknovel.DownloadProgressState>) -> Unit = { b.root.post { renderRecords(ctx, b) } }
         LlmFixManager.reconcileFromDisk(ctx)
         LlmFixManager.recordChanged += onRec
         LlmFixManager.removed += onRem
+        LlmFixManager.progressChanged += onProg
         dialog.setOnDismissListener {
             LlmFixManager.recordChanged -= onRec
             LlmFixManager.removed -= onRem
+            LlmFixManager.progressChanged -= onProg
         }
         renderRecords(ctx, b)
         dialog.show()
@@ -125,21 +128,50 @@ object LlmBackgroundDialog {
         val root = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(ctx, 10), 0, dp(ctx, 10)) }
         val tc = themeColor(ctx, R.attr.textColor)
         root.addView(TextView(ctx).apply { text = rec.name; textSize = 15f; setTextColor(tc) })
-        val prog = LlmFixManager.progress[rec.key]?.state
-        val statusTxt = when (prog) {
-            com.lagradost.quicknovel.DownloadState.IsDownloading -> "rewriting"
-            com.lagradost.quicknovel.DownloadState.IsPaused -> "paused"
+
+        val live = LlmFixManager.progress[rec.key]
+        val state = live?.state
+        val done = live?.progress?.toInt() ?: rec.fixedChapters
+        val total = (live?.total?.toInt() ?: rec.totalChapters).coerceAtLeast(1)
+        val statusTxt = when (state) {
+            com.lagradost.quicknovel.DownloadState.IsDownloading -> "rewriting  $done / $total"
+            com.lagradost.quicknovel.DownloadState.IsPaused -> "paused  $done / $total"
             com.lagradost.quicknovel.DownloadState.IsPending -> "queued"
             com.lagradost.quicknovel.DownloadState.IsFailed -> "failed"
-            else -> "ready"
+            com.lagradost.quicknovel.DownloadState.IsStopped -> "stopped  $done / $total"
+            else -> "done  ${rec.fixedChapters}/${rec.totalChapters}"
         }
         root.addView(TextView(ctx).apply {
-            text = "${LlmModels.byId(rec.modelId).id} · ${rec.fixedChapters}/${rec.totalChapters} ch · ${rec.bytes / 1024} KB · $statusTxt"
+            text = "${LlmModels.byId(rec.modelId).id} · $statusTxt · ${rec.bytes / 1024} KB"
             textSize = 12f; alpha = 0.7f; setTextColor(tc)
         })
+        // progress bar for active jobs
+        if (state == com.lagradost.quicknovel.DownloadState.IsDownloading || state == com.lagradost.quicknovel.DownloadState.IsPaused) {
+            root.addView(android.widget.ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = total; progress = done; isIndeterminate = false
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.topMargin = dp(ctx, 4); layoutParams = lp
+            })
+        }
+
         val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
-        btns.addView(textBtn(ctx, R.string.llm_graph_title) { CharacterGraphDialog.show(ctx, "b${rec.bookId}") })
-        btns.addView(textBtn(ctx, R.string.tts_pregen_delete) { LlmFixManager.deleteAll(ctx, rec.key); renderRecords(ctx, b) })
+        when (state) {
+            com.lagradost.quicknovel.DownloadState.IsDownloading -> {
+                btns.addView(textBtn(ctx, R.string.llm_job_pause) { LlmFixManager.addPendingAction(rec.key, com.lagradost.quicknovel.DownloadActionType.Pause); b.root.post { renderRecords(ctx, b) } })
+                btns.addView(textBtn(ctx, R.string.llm_job_cancel) { LlmFixManager.addPendingAction(rec.key, com.lagradost.quicknovel.DownloadActionType.Stop); b.root.post { renderRecords(ctx, b) } })
+            }
+            com.lagradost.quicknovel.DownloadState.IsPaused -> {
+                btns.addView(textBtn(ctx, R.string.llm_job_resume) { LlmFixManager.addPendingAction(rec.key, com.lagradost.quicknovel.DownloadActionType.Resume); b.root.post { renderRecords(ctx, b) } })
+                btns.addView(textBtn(ctx, R.string.llm_job_cancel) { LlmFixManager.addPendingAction(rec.key, com.lagradost.quicknovel.DownloadActionType.Stop); b.root.post { renderRecords(ctx, b) } })
+            }
+            com.lagradost.quicknovel.DownloadState.IsPending -> {
+                btns.addView(textBtn(ctx, R.string.llm_job_cancel) { LlmFixManager.addPendingAction(rec.key, com.lagradost.quicknovel.DownloadActionType.Stop); b.root.post { renderRecords(ctx, b) } })
+            }
+            else -> {
+                btns.addView(textBtn(ctx, R.string.llm_graph_title) { CharacterGraphDialog.show(ctx, "b${rec.bookId}") })
+                btns.addView(textBtn(ctx, R.string.tts_pregen_delete) { LlmFixManager.deleteAll(ctx, rec.key); renderRecords(ctx, b) })
+            }
+        }
         root.addView(btns)
         return root
     }

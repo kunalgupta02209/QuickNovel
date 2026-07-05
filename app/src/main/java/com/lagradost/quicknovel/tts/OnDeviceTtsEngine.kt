@@ -56,6 +56,10 @@ class OnDeviceTtsEngine(
     @Volatile var enhanceAudio: Boolean = true
     fun updateEnhance(on: Boolean) { enhanceAudio = on }
 
+    /** Optional GTCRN neural denoiser (heavier; applied in the producer). Off by default. */
+    @Volatile var denoise: Boolean = false
+    fun updateDenoise(on: Boolean) { denoise = on }
+
     /** Fired (audio thread) the moment a sentence starts playing: (current, upcoming) → drives the
      *  highlight AND the media-notification now-playing text, audio-synced. */
     var onAudibleLine: ((TTSHelper.TTSLine, TTSHelper.TTSLine?) -> Unit)? = null
@@ -329,7 +333,9 @@ class OnDeviceTtsEngine(
         val raw = FloatArray(total)
         var o = 0
         for (c in chunks) { System.arraycopy(c, 0, raw, o, c.size); o += c.size }
-        val out = TtsAudioCache.trimSilence(raw)
+        val trimmed = TtsAudioCache.trimSilence(raw)
+        // Optional neural denoise (ahead of playback, in the producer, so it never stalls the consumer).
+        val out = if (denoise) TtsDenoiser.process(appContext, trimmed, sampleRate, sampleRate) else trimmed
         // WRITE-THROUGH: populate the cache so re-listen / pre-generation share byte-identical audio.
         if (cacheFile != null) runCatching { TtsAudioCache.save(cacheFile, out, sampleRate) }
         val synthMs = System.currentTimeMillis() - t0

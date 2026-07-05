@@ -1380,6 +1380,7 @@ class ReadActivityViewModel : ViewModel() {
                 OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ttsGapMs, ::parseAction).also { engine ->
                     engine.cacheBookId = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
                     engine.updateEnhance(ttsEnhance)
+                    engine.updateDenoise(ttsDenoise)
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
                         TTSNotifications.updateNowPlaying(current.speakOutMsg, next?.speakOutMsg, currentTTSStatus, context)
@@ -1919,6 +1920,27 @@ class ReadActivityViewModel : ViewModel() {
             ttsEnhanceKey = value
             (ttsSession as? OnDeviceTtsEngine)?.updateEnhance(value)
         }
+    // GTCRN neural denoiser (heavier, opt-in). Enabling downloads the ~7 MB model on first use.
+    private var ttsDenoiseKey by PreferenceDelegate(EPUB_TTS_OD_DENOISE, false, Boolean::class)
+    var ttsDenoise: Boolean
+        get() = ttsDenoiseKey
+        set(value) {
+            ttsDenoiseKey = value
+            (ttsSession as? OnDeviceTtsEngine)?.updateDenoise(value)
+            if (value) ensureDenoiserDownloaded()
+        }
+
+    private val _denoiserDownloading = MutableLiveData(false)
+    val denoiserDownloading: LiveData<Boolean> = _denoiserDownloading
+    private fun ensureDenoiserDownloaded() {
+        val ctx = context ?: return
+        if (com.lagradost.quicknovel.tts.TtsDenoiser.isReady(ctx)) return
+        ioSafe {
+            _denoiserDownloading.postValue(true)
+            runCatching { com.lagradost.quicknovel.tts.TtsDenoiser.downloadModel(ctx.applicationContext) }
+            _denoiserDownloading.postValue(false)
+        }
+    }
 
     // ---- On-device LLM prose fixer ----
     private var llmModelKey by PreferenceDelegate(LLM_FIX_MODEL, "qwen2.5-1.5b", String::class)

@@ -193,6 +193,8 @@
     <string name="tts_buffer_sentences">Sentences to buffer</string>
     <string name="tts_sentence_gap">Gap between sentences (ms)</string>
     <string name="tts_enhance_audio">Clean up audio (reduce raspiness)</string>
+    <string name="tts_denoise_audio">Neural denoiser (GTCRN · higher quality, slower · ~7 MB)</string>
+    <string name="tts_denoise_downloading">Downloading denoiser model…</string>
     <string name="tts_pregen_title">Read-aloud audio</string>
     <string name="tts_pregen_book">Book</string>
     <string name="tts_pregen_range">Chapters</string>
@@ -231,6 +233,11 @@
     <string name="llm_build_graph_title">Build character map</string>
     <string name="llm_build_graph_button">Build character map</string>
     <string name="llm_build_graph_start">Build map from these chapters</string>
+    <string name="llm_job_pause">Pause</string>
+    <string name="llm_job_resume">Resume</string>
+    <string name="llm_job_cancel">Cancel</string>
+    <string name="llm_in_progress">In progress</string>
+    <string name="llm_fix_cancel">Cancel</string>
     <string name="tts_download_model">Download voice model</string>
     <string name="tts_delete_model">Delete model</string>
     <string name="tts_model_not_downloaded">Download an on-device voice model first</string>
