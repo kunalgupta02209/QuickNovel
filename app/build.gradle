@@ -17,6 +17,12 @@ android {
         enabled = true
     }
 
+    packagingOptions {
+        // Both the vendored sherpa-onnx.aar and the llama.cpp binding ship libc++_shared.so —
+        // pick either (both built with NDK r21+, so the STL runtime is compatible).
+        pickFirst 'lib/*/libc++_shared.so'
+    }
+
     defaultConfig {
         applicationId "com.lagradost.quicknovel"
         minSdkVersion 21
@@ -77,10 +83,24 @@ repositories {
     maven { url 'https://jitpack.io' }
 }*/
 
+configurations.all {
+    resolutionStrategy {
+        // The llama.cpp binding transitively pulls androidx.core 1.18.0 (minSdk 23); pin it back to the
+        // project's already-used minSdk-21-compatible version so the base app keeps minSdk 21. The LLM
+        // feature itself is runtime-gated to SDK >= 24 (the binding's minSdk, forced via tools:overrideLibrary).
+        force 'androidx.core:core:1.16.0'
+        force 'androidx.core:core-ktx:1.16.0'
+    }
+}
+
 dependencies {
     implementation fileTree(dir: "libs", include: ["*.jar"])
     // On-device neural TTS (sherpa-onnx) — vendored AAR in app/libs (see flatDir in settings.gradle.kts)
     implementation(name: 'sherpa-onnx', ext: 'aar')
+
+    // On-device LLM prose fixer (llama.cpp / GGUF, e.g. Qwen2.5). Maven artifact for now; a vendored
+    // llama-android.aar is the future FOSS-hardening path once the NDK build is set up.
+    implementation 'io.github.ljcamargo:llamacpp-kotlin:0.4.0'
     implementation 'org.apache.commons:commons-compress:1.27.1' // tar.bz2 model extraction
     //noinspection GradleDependency
     implementation 'androidx.core:core-ktx:1.16.0'

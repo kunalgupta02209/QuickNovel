@@ -42,6 +42,17 @@ const val EPUB_TTS_OD_VOICE: String = "reader_epub_tts_od_voice"   // String: "<
 const val EPUB_TTS_OD_BUFFER: String = "reader_epub_tts_od_buffer" // Int: sentences to buffer ahead (1..6)
 const val EPUB_TTS_OD_GAP: String = "reader_epub_tts_od_gap"       // Int: inter-sentence gap in ms (0..2000)
 const val TTS_PREGEN_FOLDER: String = "tts_pregen_data"           // sub-keyed by "<bookId>|<modelId>|<sid>" -> TtsPregenRecord
+
+// ---- On-device LLM novel-fixer (Qwen2.5 GGUF via llama.cpp) ----
+const val LLM_FIX_ENABLED: String = "llm_fix_enabled"             // Boolean: feature enabled at all
+const val LLM_FIX_MODEL: String = "llm_fix_model"                 // String: model id (see LlmModels)
+const val LLM_FIX_SYSTEM_PROMPT: String = "llm_fix_system_prompt" // String: editable system prompt ("" = built-in default)
+const val LLM_FIX_PROMPT_VERSION: String = "llm_fix_prompt_version" // Int: bumped on prompt edit; part of the fixed-text cache key
+const val LLM_FIX_PREV_CHAPTERS: String = "llm_fix_prev_chapters" // Int: previous chapters given as context (0..3)
+const val LLM_FIX_SHOW_FIXED: String = "llm_fix_show_fixed"       // Boolean: reader shows fixed text vs original
+const val LLM_FIX_FOLDER: String = "llm_fix_pregen"              // background-fix job records, sub-keyed like TTS_PREGEN_FOLDER
+const val CHAR_GRAPH_FOLDER: String = "char_graph"              // character memory nodes, keyed "char_graph/<bookId>/<charId>"
+
 const val EPUB_BG_COLOR: String = "reader_epub_bg_color"
 const val EPUB_TEXT_COLOR: String = "reader_epub_text_color"
 const val EPUB_TEXT_VERTICAL_PADDING: String = "reader_epub_vertical_padding"

@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- The llama.cpp binding declares minSdk 24; QuickNovel stays minSdk 21. The LLM prose-fixer is
+         runtime-gated to Build.VERSION.SDK_INT >= 24, so its classes never load on 21–23. -->
+    <uses-sdk tools:overrideLibrary="org.nehuatl.llamacpp" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
