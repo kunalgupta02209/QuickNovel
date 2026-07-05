@@ -192,6 +192,7 @@
     <string name="tts_model">Voice model</string>
     <string name="tts_buffer_sentences">Sentences to buffer</string>
     <string name="tts_sentence_gap">Gap between sentences (ms)</string>
+    <string name="tts_enhance_audio">Clean up audio (reduce raspiness)</string>
     <string name="tts_pregen_title">Read-aloud audio</string>
     <string name="tts_pregen_book">Book</string>
     <string name="tts_pregen_range">Chapters</string>

@@ -1379,6 +1379,7 @@ class ReadActivityViewModel : ViewModel() {
             ttsSession = if (modelReady && langOk) {
                 OnDeviceTtsEngine(context, ttsOnDeviceModel, ttsOnDeviceVoice, ttsLookahead, ttsGapMs, ::parseAction).also { engine ->
                     engine.cacheBookId = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
+                    engine.updateEnhance(ttsEnhance)
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
                         TTSNotifications.updateNowPlaying(current.speakOutMsg, next?.speakOutMsg, currentTTSStatus, context)
@@ -1909,6 +1910,14 @@ class ReadActivityViewModel : ViewModel() {
         set(value) {
             ttsGapKey = value.coerceIn(0, 2000)
             (ttsSession as? OnDeviceTtsEngine)?.updateGapMs(ttsGapKey)
+        }
+    // Audio clean-up (de-clip / de-ess / normalize) for the on-device engine, applied live.
+    private var ttsEnhanceKey by PreferenceDelegate(EPUB_TTS_OD_ENHANCE, true, Boolean::class)
+    var ttsEnhance: Boolean
+        get() = ttsEnhanceKey
+        set(value) {
+            ttsEnhanceKey = value
+            (ttsSession as? OnDeviceTtsEngine)?.updateEnhance(value)
         }
 
     // ---- On-device LLM prose fixer ----

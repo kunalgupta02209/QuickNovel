@@ -131,6 +131,15 @@
                 android:valueFrom="0"
                 android:valueTo="1000" />
 
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/tts_enhance_switch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:checked="true"
+                android:text="@string/tts_enhance_audio"
+                android:textColor="?attr/textColor" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tts_pregen_button"
                 android:layout_width="match_parent"

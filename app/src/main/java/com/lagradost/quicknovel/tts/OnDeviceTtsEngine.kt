@@ -52,6 +52,10 @@ class OnDeviceTtsEngine(
     @Volatile private var pitch: Float = 1.0f
     @Volatile private var gapMs: Int = gapMs.coerceIn(0, MAX_GAP_MS)
 
+    /** Clean up raspy/clipped audio before playback (see [AudioPostProcessor]). Live-toggleable. */
+    @Volatile var enhanceAudio: Boolean = true
+    fun updateEnhance(on: Boolean) { enhanceAudio = on }
+
     /** Fired (audio thread) the moment a sentence starts playing: (current, upcoming) → drives the
      *  highlight AND the media-notification now-playing text, audio-synced. */
     var onAudibleLine: ((TTSHelper.TTSLine, TTSHelper.TTSLine?) -> Unit)? = null
@@ -348,7 +352,8 @@ class OnDeviceTtsEngine(
                 while (running && item.pcm == null && !item.failed && !item.cancelled) runCatching { lock.wait(100) }
             }
             if (!running) return
-            val pcm = item.pcm
+            // Clean up the raw model audio (de-clip / de-ess / normalize) right before playback.
+            val pcm = item.pcm?.let { if (enhanceAudio) AudioPostProcessor.process(it, sampleRate) else it }
             if (!item.cancelled && !item.failed && pcm != null) {
                 val next: TTSHelper.TTSLine? = synchronized(lock) { queue.getOrNull(playPos + 1)?.line }
                 onAudibleLine?.invoke(item.line, next) // highlight + notification, audio-synced
