@@ -9,8 +9,9 @@ interface ProseFixerEngine {
     /** Load the GGUF model (heavy, blocking C++). Returns true on success. */
     suspend fun load(): Boolean
 
-    /** Run one completion for [prompt] (already ChatML-formatted) and return the full generated text. */
-    suspend fun generate(prompt: String): String
+    /** Run one completion for [prompt] (already ChatML-formatted) and return the full generated text.
+     *  [onToken] is invoked for each streamed token, for live UI display. */
+    suspend fun generate(prompt: String, onToken: ((String) -> Unit)? = null): String
 
     fun close()
 
@@ -36,7 +37,8 @@ HARD RULES:
 5. Write out every number, ordinal, date, currency amount, and abbreviation in words (for example "3rd" becomes "third", "5,000 spirit stones" becomes "five thousand spirit stones", "Dr." becomes "Doctor"), so the voice never mis-reads them.
 6. Do not use em dashes or en dashes; use commas, periods, or "and" / "but". Do not use "..." for pauses; end the sentence or use a comma. Attribute dialogue in standard English order: "Come with me," she said.
 7. Keep paragraphs short, three to five sentences each, separated by a single blank line. Keep most sentences under about twenty-five words.
-8. Output ONLY the rewritten chapter. No preamble, title, explanation, or closing remark."""
+8. Output ONLY the rewritten chapter. No preamble, title, explanation, or closing remark.
+9. Never repeat a sentence or a paragraph. Rewrite each part of the text exactly once, then stop; do not pad, summarize, or loop."""
 
     /** One extra line appended to the system prompt when the active TTS voice is Supertonic. */
     const val SUPERTONIC_LINE: String =

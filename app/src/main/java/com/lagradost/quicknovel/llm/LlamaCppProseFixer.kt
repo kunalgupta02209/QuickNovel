@@ -60,7 +60,7 @@ class LlamaCppProseFixer(
         loaded
     }
 
-    override suspend fun generate(prompt: String): String = withContext(Dispatchers.IO) {
+    override suspend fun generate(prompt: String, onToken: ((String) -> Unit)?): String = withContext(Dispatchers.IO) {
         if (!loaded) return@withContext ""
         val sb = StringBuilder()
         try {
@@ -71,7 +71,7 @@ class LlamaCppProseFixer(
                     runCatching { helper.predict(prompt, null, true) }.onFailure { logError(it) }
                 }
                 .takeWhile { it !is LlamaHelper.LLMEvent.Done && it !is LlamaHelper.LLMEvent.Error }
-                .collect { e -> if (e is LlamaHelper.LLMEvent.Ongoing) sb.append(e.word) }
+                .collect { e -> if (e is LlamaHelper.LLMEvent.Ongoing) { sb.append(e.word); onToken?.invoke(e.word) } }
         } catch (t: Throwable) {
             logError(t)
         }

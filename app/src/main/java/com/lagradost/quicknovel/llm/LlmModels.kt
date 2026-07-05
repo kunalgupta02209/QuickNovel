@@ -15,8 +15,9 @@ import java.net.URL
  * the key property for repairing CJK-origin machine translation (gender-ambiguous pronouns, honorifics).
  */
 object LlmModels {
-    /** llama.cpp context window; 2048 halves KV-cache RAM vs 4096 at negligible quality cost here. */
-    const val CTX_LEN = 2048
+    /** llama.cpp context window. Chapters are chunked to fit this alongside the prompt + generated
+     *  output; 4096 comfortably holds one ~2800-char chunk + system prompt + memory + the rewrite. */
+    const val CTX_LEN = 4096
 
     data class ModelDef(
         val id: String,

@@ -158,6 +158,26 @@
             android:visibility="gone"
             tools:text="Fixing with Qwen2.5 1.5B…" />
 
+        <!-- Live streaming preview of the rewrite (tokens appear as they generate). -->
+        <ScrollView
+            android:id="@+id/llm_stream_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_marginTop="8dp"
+            android:background="?attr/primaryBlackBackground"
+            android:padding="10dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/llm_stream"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="?attr/textColor"
+                android:textSize="13sp"
+                android:lineSpacingMultiplier="1.15"
+                tools:text="He walked slowly to the store…" />
+        </ScrollView>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/llm_fix_chapter"
             android:layout_width="match_parent"

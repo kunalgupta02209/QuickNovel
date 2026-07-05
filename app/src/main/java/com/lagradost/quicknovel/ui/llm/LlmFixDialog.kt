@@ -102,6 +102,14 @@ object LlmFixDialog {
             viewModel.fixCurrentChapter(
                 activity,
                 onState = { s -> activity.runOnUiThread { b.llmStatus.text = s } },
+                onStream = { info, text ->
+                    activity.runOnUiThread {
+                        b.llmStatus.text = info
+                        b.llmStreamScroll.visibility = View.VISIBLE
+                        b.llmStream.text = text
+                        b.llmStreamScroll.post { b.llmStreamScroll.fullScroll(View.FOCUS_DOWN) }
+                    }
+                },
                 onDone = { ok ->
                     activity.runOnUiThread {
                         Toast.makeText(

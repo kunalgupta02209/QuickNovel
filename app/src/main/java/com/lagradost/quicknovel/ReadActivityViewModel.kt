@@ -1947,7 +1947,12 @@ class ReadActivityViewModel : ViewModel() {
     private fun maybeFixedText(context: Context?, index: Int, raw: String): String {
         if (!llmShowFixedKey || context == null) return raw
         val id = llmBookId() ?: return raw
-        return com.lagradost.quicknovel.llm.FixedTextCache.load(context, id, llmModel, llmPromptVersion, index) ?: raw
+        val fixed = com.lagradost.quicknovel.llm.FixedTextCache.load(context, id, llmModel, llmPromptVersion, index)
+            ?: return raw
+        // The fixer emits plain text with blank-line paragraphs; wrap them as <p> so the reader's HTML
+        // pipeline (preParseHtml -> markwon) keeps paragraph breaks like the original chapter.
+        return fixed.split(Regex("\n{2,}")).filter { it.isNotBlank() }
+            .joinToString("\n") { "<p>" + it.trim().replace("\n", " ") + "</p>" }
     }
 
     private fun llmSupertonic(): Boolean =
@@ -1970,20 +1975,40 @@ class ReadActivityViewModel : ViewModel() {
      * LLM, cache the result, then flip to "show fixed" and reload. [onState] reports coarse progress;
      * [onDone] fires with success. Heavy (minutes on mid-range) — runs entirely off the main thread.
      */
-    fun fixCurrentChapter(context: Context, onState: (String) -> Unit, onDone: (Boolean) -> Unit) = ioSafe {
+    fun fixCurrentChapter(
+        context: Context,
+        onState: (String) -> Unit,
+        onStream: (info: String, text: String) -> Unit,
+        onDone: (Boolean) -> Unit,
+    ) = ioSafe {
+        val tag = "LlmFixFlow"
         val index = currentIndex
-        val bookId = llmBookId() ?: return@ioSafe onDone(false)
+        android.util.Log.i(tag, "fix start: index=$index model=$llmModel")
+        if (index == Int.MIN_VALUE) { android.util.Log.e(tag, "currentIndex not set"); return@ioSafe onDone(false) }
+        val bookId = llmBookId()
+        if (bookId == null) { android.util.Log.e(tag, "no bookId"); return@ioSafe onDone(false) }
         if (!com.lagradost.quicknovel.llm.LlmModels.isReady(context, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel))) {
-            onState("Model not downloaded"); return@ioSafe onDone(false)
+            android.util.Log.e(tag, "model not ready: $llmModel"); onState("Model not downloaded"); return@ioSafe onDone(false)
         }
         onState(context.getString(R.string.llm_fixing_loading))
         val raw = safeApiCall { book.getChapterData(index, false) }
         val rawText = (raw as? Resource.Success)?.value?.let { preParseHtml(it, authorNotes) }
-        if (rawText.isNullOrBlank()) return@ioSafe onDone(false)
+        if (rawText.isNullOrBlank()) {
+            android.util.Log.e(tag, "rawText blank (raw=${raw.javaClass.simpleName}) for index=$index")
+            return@ioSafe onDone(false)
+        }
+        android.util.Log.i(tag, "rawText len=${rawText.length}; loading engine + generating…")
         val prev = buildPreviousContext(index)
         onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
         val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic())
-        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, cfg)
+        // The on-the-spot button always regenerates: drop any stale cached fix so improvements apply.
+        com.lagradost.quicknovel.llm.FixedTextCache.deleteChapter(context, bookId, llmModel, llmPromptVersion, index)
+        val streamed = StringBuilder()
+        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, cfg) { chunkIdx, chunkCount, token ->
+            streamed.append(token)
+            onStream("Rewriting  ·  chunk ${chunkIdx + 1} / $chunkCount", streamed.toString())
+        }
+        android.util.Log.i(tag, "fix result: ${if (fixed != null) "OK len=${fixed.length}" else "NULL (engine load or blank generation)"}")
         if (fixed != null) {
             llmShowFixedKey = true
             refreshChapters()

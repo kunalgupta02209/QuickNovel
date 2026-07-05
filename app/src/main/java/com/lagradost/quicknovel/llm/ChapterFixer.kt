@@ -23,11 +23,17 @@ object ChapterFixer {
         if (cur != null && cur.isLoaded && engineModelId == modelId) return cur
         cur?.close(); engine = null; engineModelId = null
         val def = LlmModels.byId(modelId)
-        if (!LlmModels.isReady(context, def)) return null
-        val e = LlamaCppProseFixer(context.applicationContext, LlmModels.modelFile(context, def))
+        if (!LlmModels.isReady(context, def)) {
+            android.util.Log.e("LlmFixFlow", "ensureEngine: model $modelId not ready on disk"); return null
+        }
+        val file = LlmModels.modelFile(context, def)
+        android.util.Log.i("LlmFixFlow", "ensureEngine: loading $modelId (${file.length() / (1024 * 1024)} MB)…")
+        val e = LlamaCppProseFixer(context.applicationContext, file)
         return if (e.load()) {
+            android.util.Log.i("LlmFixFlow", "ensureEngine: $modelId loaded")
             engine = e; engineModelId = modelId; e
         } else {
+            android.util.Log.e("LlmFixFlow", "ensureEngine: load() FAILED for $modelId")
             e.close(); null
         }
     }
@@ -54,27 +60,92 @@ object ChapterFixer {
         rawText: String,
         previousChapters: String,
         cfg: FixConfig,
+        onProgress: ((chunkIndex: Int, chunkCount: Int, token: String) -> Unit)? = null,
     ): String? {
         FixedTextCache.load(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex)?.let { return it }
         if (rawText.isBlank()) return null
         val e = ensureEngine(context, cfg.modelId) ?: return null
         return try {
-            val prompt = ProseFixPrompt.buildFixPrompt(
-                systemPrompt = cfg.systemPrompt,
-                previousChapters = previousChapters,
-                characterMemory = CharacterGraph.memoryBlock(bookId, chapterIndex), // cross-chapter consistency
-                chapterText = rawText,
-                supertonic = cfg.supertonic,
-            )
-            val out = cleanOutput(e.generate(prompt))
-            if (out.isBlank()) null
-            else {
-                FixedTextCache.save(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex, out)
-                out
+            val memory = CharacterGraph.memoryBlock(bookId, chapterIndex) // cross-chapter consistency
+            // A full chapter is far larger than the context window, so rewrite it in paragraph-sized
+            // chunks (prompt + chunk + generated output must all fit in LlmModels.CTX_LEN) and stitch.
+            val chunks = splitIntoChunks(rawText, CHUNK_CHARS)
+            android.util.Log.i("LlmFixFlow", "fixChapter ch$chapterIndex: ${rawText.length} chars -> ${chunks.size} chunk(s)")
+            val sb = StringBuilder()
+            for ((i, chunk) in chunks.withIndex()) {
+                if (chunk.isBlank()) continue
+                val prompt = ProseFixPrompt.buildFixPrompt(
+                    systemPrompt = cfg.systemPrompt,
+                    previousChapters = if (i == 0) previousChapters.takeLast(800) else "",
+                    characterMemory = memory,
+                    chapterText = chunk,
+                    supertonic = cfg.supertonic,
+                )
+                val out = cleanOutput(e.generate(prompt) { tok -> onProgress?.invoke(i, chunks.size, tok) })
+                android.util.Log.i("LlmFixFlow", "  chunk ${i + 1}/${chunks.size}: in=${chunk.length} out=${out.length}")
+                if (out.isNotBlank()) sb.append(out).append("\n\n")
+            }
+            val full = dedupeRepetition(sb.toString())
+            if (full.isBlank()) {
+                android.util.Log.e("LlmFixFlow", "fixChapter: all chunks blank for ch $chapterIndex")
+                null
+            } else {
+                FixedTextCache.save(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex, full)
+                full
             }
         } catch (t: Throwable) {
+            android.util.Log.e("LlmFixFlow", "fixChapter: exception", t)
             logError(t); null
         }
+    }
+
+    /** Target chunk size in characters (~700-900 tokens) so prompt + chunk + output fit CTX_LEN. */
+    private const val CHUNK_CHARS = 2800
+
+    /** Split chapter text into <= [maxChars] chunks on paragraph boundaries (hard-splitting any giant
+     *  paragraph), so each chunk plus its prompt and rewrite fit the model's context window. */
+    private fun splitIntoChunks(text: String, maxChars: Int): List<String> {
+        val paras = text.split(Regex("\n\\s*\n"))
+        val chunks = ArrayList<String>()
+        val cur = StringBuilder()
+        fun flush() { if (cur.isNotBlank()) { chunks.add(cur.toString().trim()); cur.setLength(0) } }
+        for (p in paras) {
+            when {
+                p.length > maxChars -> {
+                    flush()
+                    p.chunked(maxChars).forEach { chunks.add(it.trim()) }
+                }
+                cur.length + p.length > maxChars -> {
+                    flush(); cur.append(p).append("\n\n")
+                }
+                else -> cur.append(p).append("\n\n")
+            }
+        }
+        flush()
+        return chunks.filter { it.isNotBlank() }
+    }
+
+    /**
+     * Collapse the repetition small models fall into (the binding exposes no repeat-penalty): drop
+     * near-duplicate paragraphs and consecutive duplicate sentences. PRESERVES paragraph breaks so the
+     * fixed text stays comparable to the original.
+     */
+    private fun dedupeRepetition(text: String): String {
+        val paras = text.split(Regex("\n{2,}")).map { it.trim() }.filter { it.isNotEmpty() }
+        val keptParas = ArrayList<String>()
+        for (p in paras) {
+            if (keptParas.takeLast(3).any { me.xdrop.fuzzywuzzy.FuzzySearch.ratio(it, p) >= 90 }) continue
+            val sents = p.split(Regex("(?<=[.!?\"”])\\s+"))
+            val ks = ArrayList<String>()
+            for (s in sents) {
+                val t = s.trim()
+                if (t.isEmpty()) continue
+                if (ks.isNotEmpty() && me.xdrop.fuzzywuzzy.FuzzySearch.ratio(ks.last(), t) >= 92) continue
+                ks.add(t)
+            }
+            if (ks.isNotEmpty()) keptParas.add(ks.joinToString(" "))
+        }
+        return keptParas.joinToString("\n\n").trim()
     }
 
     /**
