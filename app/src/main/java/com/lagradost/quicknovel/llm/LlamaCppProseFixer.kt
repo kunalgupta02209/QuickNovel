@@ -66,8 +66,9 @@ class LlamaCppProseFixer(
         try {
             events
                 .onSubscription {
-                    // 3rd arg = "format as chat template"; false because we pass a fully-built ChatML string.
-                    runCatching { helper.predict(prompt, null, false) }.onFailure { logError(it) }
+                    // 3rd arg = emit_partial_completion: true streams each token as an LLMEvent.Ongoing
+                    // (false runs generation but emits nothing per-token — verified via RNLlama logs).
+                    runCatching { helper.predict(prompt, null, true) }.onFailure { logError(it) }
                 }
                 .takeWhile { it !is LlamaHelper.LLMEvent.Done && it !is LlamaHelper.LLMEvent.Error }
                 .collect { e -> if (e is LlamaHelper.LLMEvent.Ongoing) sb.append(e.word) }
