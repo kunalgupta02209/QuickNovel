@@ -19,6 +19,7 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.lagradost.quicknovel", appContext.packageName)
+        // Debug builds carry an applicationIdSuffix (".debug"), so match the prefix.
+        assertTrue(appContext.packageName.startsWith("com.lagradost.quicknovel"))
     }
 }
