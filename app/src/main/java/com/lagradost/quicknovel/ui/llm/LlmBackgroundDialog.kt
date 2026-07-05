@@ -84,6 +84,7 @@ object LlmBackgroundDialog {
                 systemPrompt = viewModel.llmSystemPrompt, prevChapters = viewModel.llmPrevChapters,
                 rangeStart = start.coerceAtLeast(0), rangeEnd = end.coerceAtLeast(start),
                 graphOnly = graphOnly,
+                serverUrl = viewModel.llmServerUrl, serverModel = viewModel.llmServerModel,
             )
             LlmFixManager.enqueue(ctx, req)
             Toast.makeText(ctx, R.string.tts_pregen_started, Toast.LENGTH_SHORT).show()

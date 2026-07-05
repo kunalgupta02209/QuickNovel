@@ -1950,6 +1950,9 @@ class ReadActivityViewModel : ViewModel() {
     var llmSystemPrompt by PreferenceDelegate(LLM_FIX_SYSTEM_PROMPT, "", String::class)
     var llmPromptVersion by PreferenceDelegate(LLM_FIX_PROMPT_VERSION, 1, Int::class)
     var llmPrevChapters by PreferenceDelegate(LLM_FIX_PREV_CHAPTERS, 2, Int::class)
+    // Optional GPU fix server: when the URL is set, rewriting offloads to it (seconds vs minutes).
+    var llmServerUrl by PreferenceDelegate(LLM_FIX_SERVER_URL, "", String::class)
+    var llmServerModel by PreferenceDelegate(LLM_FIX_SERVER_MODEL, "", String::class)
 
     private var llmShowFixedKey by PreferenceDelegate(LLM_FIX_SHOW_FIXED, false, Boolean::class)
     /** Whether the reader currently substitutes LLM-fixed text for the original. Toggling reloads. */
@@ -2018,7 +2021,9 @@ class ReadActivityViewModel : ViewModel() {
         if (index == Int.MIN_VALUE) { android.util.Log.e(tag, "currentIndex not set"); return@ioSafe onDone(false) }
         val bookId = llmBookId()
         if (bookId == null) { android.util.Log.e(tag, "no bookId"); return@ioSafe onDone(false) }
-        if (!com.lagradost.quicknovel.llm.LlmModels.isReady(context, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel))) {
+        if (llmServerUrl.isBlank() &&
+            !com.lagradost.quicknovel.llm.LlmModels.isReady(context, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel))
+        ) {
             android.util.Log.e(tag, "model not ready: $llmModel"); onState("Model not downloaded"); return@ioSafe onDone(false)
         }
         onState(context.getString(R.string.llm_fixing_loading))
@@ -2031,7 +2036,9 @@ class ReadActivityViewModel : ViewModel() {
         android.util.Log.i(tag, "rawText len=${rawText.length}; loading engine + generating…")
         val prev = buildPreviousContext(index)
         onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
-        val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic())
+        val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(
+            llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic(), llmServerUrl, llmServerModel,
+        )
         // The on-the-spot button always regenerates: drop any stale cached fix so improvements apply.
         com.lagradost.quicknovel.llm.FixedTextCache.deleteChapter(context, bookId, llmModel, llmPromptVersion, index)
         val streamed = StringBuilder()

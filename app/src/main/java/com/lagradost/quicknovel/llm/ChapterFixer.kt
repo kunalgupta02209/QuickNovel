@@ -52,6 +52,8 @@ object ChapterFixer {
         val promptVersion: Int,
         val systemPrompt: String,      // "" -> built-in default
         val supertonic: Boolean = false,
+        val serverUrl: String = "",    // non-blank -> offload to the GPU fix server
+        val serverModel: String = "",  // server model id ("" -> server default)
     )
 
     /**
@@ -69,6 +71,18 @@ object ChapterFixer {
     ): String? {
         FixedTextCache.load(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex)?.let { return it }
         if (rawText.isBlank()) return null
+        // Remote GPU-server path — fast (seconds); falls back to on-device if it fails/unreachable.
+        if (cfg.serverUrl.isNotBlank()) {
+            val memory = CharacterGraph.memoryBlock(bookId, chapterIndex)
+            val remote = RemoteFixClient.fixSnippet(cfg.serverUrl, rawText, cfg.serverModel, previousChapters, memory)
+            if (!remote.isNullOrBlank()) {
+                val cleaned = dedupeRepetition(remote)
+                onProgress?.invoke(0, 1, cleaned)
+                FixedTextCache.save(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex, cleaned)
+                return cleaned
+            }
+            android.util.Log.w("LlmFixFlow", "remote fix failed; falling back to on-device")
+        }
         val e = ensureEngine(context, cfg.modelId) ?: return null
         return try {
             val memory = CharacterGraph.memoryBlock(bookId, chapterIndex) // cross-chapter consistency

@@ -40,6 +40,8 @@ object LlmFixManager {
         val rangeStart: Int,
         val rangeEnd: Int,
         val graphOnly: Boolean = false, // true = extract characters/setting only (no text rewrite)
+        val serverUrl: String = "",     // non-blank -> offload rewriting to the GPU fix server
+        val serverModel: String = "",
     ) {
         val key: String get() = "$bookId|$modelId|$promptVersion${if (graphOnly) "|g" else ""}"
         val notifId: Int get() = key.hashCode() xor 0x99150000.toInt()
@@ -96,9 +98,11 @@ object LlmFixManager {
         val total = req.rangeEnd - req.rangeStart + 1
         var done = 0
         var finalState = DownloadState.IsDone
-        val cfg = ChapterFixer.FixConfig(req.modelId, req.promptVersion, req.systemPrompt)
+        val cfg = ChapterFixer.FixConfig(
+            req.modelId, req.promptVersion, req.systemPrompt, serverUrl = req.serverUrl, serverModel = req.serverModel,
+        )
         try {
-            if (!LlmModels.isReady(ctx, LlmModels.byId(req.modelId))) {
+            if (req.serverUrl.isBlank() && !LlmModels.isReady(ctx, LlmModels.byId(req.modelId))) {
                 finalState = DownloadState.IsFailed
             } else {
                 emit(ctx, req, DownloadState.IsDownloading, 0, total)

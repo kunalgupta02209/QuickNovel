@@ -90,6 +90,45 @@
             android:layout_marginTop="8dp"
             android:text="@string/llm_download_model" />
 
+        <!-- Optional GPU fix server -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/llm_server_section"
+            android:textColor="?attr/textColor"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/llm_server_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="?attr/primaryBlackBackground"
+            android:hint="@string/llm_server_url_hint"
+            android:inputType="textUri"
+            android:padding="10dp"
+            android:textColor="?attr/textColor"
+            android:textColorHint="?attr/grayTextColor"
+            android:textSize="13sp"
+            android:importantForAutofill="no"
+            tools:ignore="LabelFor" />
+
+        <Spinner
+            android:id="@+id/llm_server_model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/llm_server_jobs"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/llm_server_jobs"
+            android:visibility="gone" />
+
         <!-- System prompt -->
         <LinearLayout
             android:layout_width="match_parent"

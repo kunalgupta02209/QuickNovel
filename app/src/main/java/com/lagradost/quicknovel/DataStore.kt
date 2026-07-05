@@ -53,6 +53,8 @@ const val LLM_FIX_PROMPT_VERSION: String = "llm_fix_prompt_version" // Int: bump
 const val LLM_FIX_PREV_CHAPTERS: String = "llm_fix_prev_chapters" // Int: previous chapters given as context (0..3)
 const val LLM_FIX_SHOW_FIXED: String = "llm_fix_show_fixed"       // Boolean: reader shows fixed text vs original
 const val LLM_FIX_FOLDER: String = "llm_fix_pregen"              // background-fix job records, sub-keyed like TTS_PREGEN_FOLDER
+const val LLM_FIX_SERVER_URL: String = "llm_fix_server_url"     // String: GPU fix server base URL ("" = on-device)
+const val LLM_FIX_SERVER_MODEL: String = "llm_fix_server_model" // String: server model id ("" = server default)
 const val CHAR_GRAPH_FOLDER: String = "char_graph"              // character memory nodes, keyed "char_graph/<bookId>/<charId>"
 
 const val EPUB_BG_COLOR: String = "reader_epub_bg_color"

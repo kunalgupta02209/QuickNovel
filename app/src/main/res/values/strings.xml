@@ -238,6 +238,12 @@
     <string name="llm_job_cancel">Cancel</string>
     <string name="llm_in_progress">In progress</string>
     <string name="llm_fix_cancel">Cancel</string>
+    <string name="llm_server_section">Fix server (optional — GPU, much faster)</string>
+    <string name="llm_server_url_hint">http://192.168.1.10:8000  (blank = on-device)</string>
+    <string name="llm_server_jobs">Server jobs</string>
+    <string name="llm_refresh">Refresh</string>
+    <string name="llm_server_unreachable">Server unreachable</string>
+    <string name="llm_server_connected">Connected · %1$d models</string>
     <string name="tts_download_model">Download voice model</string>
     <string name="tts_delete_model">Delete model</string>
     <string name="tts_model_not_downloaded">Download an on-device voice model first</string>

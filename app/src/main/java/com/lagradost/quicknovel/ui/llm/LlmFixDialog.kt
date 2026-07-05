@@ -70,6 +70,40 @@ object LlmFixDialog {
             }
         }
 
+        // ---- optional GPU fix server ----
+        b.llmServerUrl.setText(viewModel.llmServerUrl)
+        fun loadServerModels() {
+            val url = b.llmServerUrl.text.toString().trim()
+            viewModel.llmServerUrl = url
+            if (url.isBlank()) {
+                b.llmServerModel.visibility = View.GONE; b.llmServerJobs.visibility = View.GONE; return
+            }
+            activity.lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val models = com.lagradost.quicknovel.llm.RemoteFixClient.listModels(url)
+                activity.runOnUiThread {
+                    if (models.isEmpty()) {
+                        b.llmServerModel.visibility = View.GONE; b.llmServerJobs.visibility = View.GONE
+                        android.widget.Toast.makeText(activity, R.string.llm_server_unreachable, android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        b.llmServerJobs.visibility = View.VISIBLE
+                        b.llmServerModel.visibility = View.VISIBLE
+                        val ids = models.map { it.id }
+                        b.llmServerModel.adapter = android.widget.ArrayAdapter(activity, android.R.layout.simple_spinner_dropdown_item, models.map { it.name })
+                        val sel = ids.indexOf(viewModel.llmServerModel).coerceAtLeast(0)
+                        b.llmServerModel.setSelection(sel)
+                        b.llmServerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) { viewModel.llmServerModel = ids[pos] }
+                            override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+                        }
+                        android.widget.Toast.makeText(activity, activity.getString(R.string.llm_server_connected, models.size), android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        if (viewModel.llmServerUrl.isNotBlank()) loadServerModels()
+        b.llmServerUrl.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) loadServerModels() }
+        b.llmServerJobs.setOnClickListener { ServerJobsDialog.show(activity, viewModel.llmServerUrl) }
+
         // ---- fixed / original toggle (only if a fix exists for the current chapter) ----
         val idx = viewModel.currentIndex
         if (idx != Int.MIN_VALUE && viewModel.hasFixedChapter(activity, idx)) {
@@ -108,7 +142,7 @@ object LlmFixDialog {
                 resetFixButton()
                 return@setOnClickListener
             }
-            if (!LlmModels.isReady(activity, def)) {
+            if (viewModel.llmServerUrl.isBlank() && !LlmModels.isReady(activity, def)) {
                 Toast.makeText(activity, R.string.llm_model_not_ready, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -145,7 +179,7 @@ object LlmFixDialog {
 
         // ---- fix whole novel in background ----
         b.llmFixWhole.setOnClickListener {
-            if (!LlmModels.isReady(activity, def)) {
+            if (viewModel.llmServerUrl.isBlank() && !LlmModels.isReady(activity, def)) {
                 Toast.makeText(activity, R.string.llm_model_not_ready, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -156,7 +190,7 @@ object LlmFixDialog {
 
         // ---- build character map (first N chapters, extract only) ----
         b.llmBuildGraph.setOnClickListener {
-            if (!LlmModels.isReady(activity, def)) {
+            if (viewModel.llmServerUrl.isBlank() && !LlmModels.isReady(activity, def)) {
                 Toast.makeText(activity, R.string.llm_model_not_ready, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
