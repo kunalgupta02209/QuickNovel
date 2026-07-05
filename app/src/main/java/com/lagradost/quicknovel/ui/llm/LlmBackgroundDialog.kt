@@ -30,11 +30,16 @@ import com.lagradost.quicknovel.ui.download.DownloadFragment
 object LlmBackgroundDialog {
     private data class BookRow(val name: String, val author: String?, val apiName: String, val poster: String?, val chapters: Int)
 
-    fun show(activity: ReadActivity2, viewModel: ReadActivityViewModel) {
+    fun show(activity: ReadActivity2, viewModel: ReadActivityViewModel, graphOnly: Boolean = false) {
         val ctx: Context = activity
         val b = DialogLlmBackgroundBinding.inflate(LayoutInflater.from(ctx))
         val dialog = BottomSheetDialog(ctx)
         dialog.setContentView(b.root)
+
+        if (graphOnly) {
+            b.llmBgTitle.setText(R.string.llm_build_graph_title)
+            b.llmBgStart.setText(R.string.llm_build_graph_start)
+        }
 
         val books = loadBooks(ctx)
         if (books.isEmpty()) {
@@ -48,13 +53,14 @@ object LlmBackgroundDialog {
 
         fun applyRange(book: BookRow) {
             val max = book.chapters.coerceAtLeast(1)
+            val upper = if (graphOnly) minOf(10, max) else max // character map defaults to the first 10 chapters
             runCatching {
                 b.llmBgRange.valueFrom = 1f
                 b.llmBgRange.valueTo = max.coerceAtLeast(2).toFloat()
                 b.llmBgRange.stepSize = 1f
-                b.llmBgRange.setValues(1f, max.toFloat())
+                b.llmBgRange.setValues(1f, upper.toFloat())
             }
-            b.llmBgRangeLabel.text = "Chapters  1 – $max"
+            b.llmBgRangeLabel.text = "Chapters  1 – $upper"
         }
         if (books.isNotEmpty()) applyRange(books[0])
         b.llmBgBook.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -77,6 +83,7 @@ object LlmBackgroundDialog {
                 modelId = viewModel.llmModel, promptVersion = viewModel.llmPromptVersion,
                 systemPrompt = viewModel.llmSystemPrompt, prevChapters = viewModel.llmPrevChapters,
                 rangeStart = start.coerceAtLeast(0), rangeEnd = end.coerceAtLeast(start),
+                graphOnly = graphOnly,
             )
             LlmFixManager.enqueue(ctx, req)
             Toast.makeText(ctx, R.string.tts_pregen_started, Toast.LENGTH_SHORT).show()

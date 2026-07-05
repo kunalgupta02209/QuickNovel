@@ -174,5 +174,13 @@
             android:layout_marginTop="8dp"
             android:text="@string/llm_fix_whole_novel" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/llm_build_graph"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/llm_build_graph_button" />
+
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

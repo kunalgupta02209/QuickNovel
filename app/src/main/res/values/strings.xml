@@ -227,6 +227,9 @@
     <string name="llm_manage_existing">Rewritten novels</string>
     <string name="llm_graph_title">Characters</string>
     <string name="llm_graph_empty">No characters extracted yet</string>
+    <string name="llm_build_graph_title">Build character map</string>
+    <string name="llm_build_graph_button">Build character map</string>
+    <string name="llm_build_graph_start">Build map from these chapters</string>
     <string name="tts_download_model">Download voice model</string>
     <string name="tts_delete_model">Delete model</string>
     <string name="tts_model_not_downloaded">Download an on-device voice model first</string>

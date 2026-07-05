@@ -39,8 +39,9 @@ object LlmFixManager {
         val prevChapters: Int,
         val rangeStart: Int,
         val rangeEnd: Int,
+        val graphOnly: Boolean = false, // true = extract characters/setting only (no text rewrite)
     ) {
-        val key: String get() = "$bookId|$modelId|$promptVersion"
+        val key: String get() = "$bookId|$modelId|$promptVersion${if (graphOnly) "|g" else ""}"
         val notifId: Int get() = key.hashCode() xor 0x99150000.toInt()
         val bookIdStr: String get() = "b$bookId"
     }
@@ -103,13 +104,18 @@ object LlmFixManager {
                 emit(ctx, req, DownloadState.IsDownloading, 0, total)
                 loop@ for (index in req.rangeStart..req.rangeEnd) {
                     if (!waitIfPaused(ctx, req, done, total)) { finalState = DownloadState.IsStopped; break@loop }
-                    if (!FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index)) {
-                        val raw = readRawChapter(ctx, req, index, authorNotes)
-                        if (raw != null) {
+                    val raw = readRawChapter(ctx, req, index, authorNotes)
+                    if (raw != null) {
+                        if (req.graphOnly) {
+                            // Character-map build: extract only, from RAW text; setting from the first chapter.
+                            if (index == req.rangeStart) ChapterFixer.extractSetting(ctx, req.bookIdStr, raw, cfg)
+                            ChapterFixer.extractCharacters(ctx, req.bookIdStr, index, raw, cfg)
+                            if (peekStop(key)) { finalState = DownloadState.IsStopped; break@loop }
+                        } else if (!FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index)) {
                             val prev = buildPrevContext(ctx, req, index, authorNotes)
                             val out = ChapterFixer.fixChapter(ctx, req.bookIdStr, index, raw, prev, cfg)
                             if (out == null && peekStop(key)) { finalState = DownloadState.IsStopped; break@loop }
-                            // Populate the character memory graph from the fixed text (background only).
+                            // Populate the character memory graph from the fixed text.
                             if (out != null) ChapterFixer.extractCharacters(ctx, req.bookIdStr, index, out, cfg)
                         }
                     }

@@ -37,9 +37,10 @@ object LlmFixNotifications {
 
     private fun build(context: Context, req: LlmFixManager.FixRequest, state: DownloadState, done: Int, total: Int): Notification {
         ensureChannel(context)
+        val verb = if (req.graphOnly) "Building character map" else "Rewriting"
         val status = when (state) {
-            DownloadState.IsDone -> "Rewrite complete"
-            DownloadState.IsDownloading -> "Rewriting  $done / $total"
+            DownloadState.IsDone -> if (req.graphOnly) "Character map ready" else "Rewrite complete"
+            DownloadState.IsDownloading -> "$verb  $done / $total"
             DownloadState.IsPaused -> "Paused  $done / $total"
             DownloadState.IsFailed -> "Failed"
             DownloadState.IsStopped -> "Stopped"

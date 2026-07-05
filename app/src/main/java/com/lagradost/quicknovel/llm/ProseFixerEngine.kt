@@ -82,4 +82,13 @@ HARD RULES:
         }
         return chatml(EXTRACT_SYSTEM_PROMPT, user)
     }
+
+    /** Setting summary system prompt — one short paragraph of genre / world / era / tone. */
+    const val SETTING_SYSTEM_PROMPT: String =
+        "You summarize the SETTING of a web novel from a chapter. Reply with ONE or TWO plain sentences only " +
+        "(no lists, no preamble, no headings) covering: the genre (for example cultivation / xianxia / wuxia, " +
+        "system or LitRPG, romance, modern), the world and era, and the overall tone. Be concise and factual."
+
+    fun buildSettingPrompt(chapterText: String): String =
+        chatml(SETTING_SYSTEM_PROMPT, "CHAPTER:\n" + chapterText.take(4000))
 }

@@ -93,6 +93,18 @@ object ChapterFixer {
         }
     }
 
+    /** Summarize the novel's setting (genre / world / tone) from a chapter and store it on the graph. */
+    suspend fun extractSetting(context: Context, bookId: String, chapterText: String, cfg: FixConfig) {
+        if (chapterText.isBlank()) return
+        val e = ensureEngine(context, cfg.modelId) ?: return
+        try {
+            val out = cleanOutput(e.generate(ProseFixPrompt.buildSettingPrompt(chapterText)))
+            if (out.isNotBlank()) CharacterGraph.saveSetting(bookId, out)
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
+
     /** Strip anything a small model might leak around the prose (chat markers, code fences, a leading label). */
     private fun cleanOutput(raw: String): String {
         var s = raw.trim()

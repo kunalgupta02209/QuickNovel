@@ -93,8 +93,10 @@ class LlmSmokeTest {
         val cached = ChapterFixer.fixChapter(ctx, bookId, 0, raw, "", cfg) // 2nd call = cache hit (instant)
         Assert.assertEquals("2nd call should return cached identical text", fixed, cached)
 
-        // P3: extract characters -> merge -> graph
+        // P3: extract characters + setting -> merge -> graph
         ChapterFixer.extractCharacters(ctx, bookId, 0, fixed!!, cfg)
+        ChapterFixer.extractSetting(ctx, bookId, fixed, cfg)
+        Log.i(TAG, "===== SETTING =====\n${CharacterGraph.setting(bookId)}")
         val nodes = CharacterGraph.load(bookId)
         Log.i(TAG, "===== P3 GRAPH: ${nodes.size} nodes =====\n${nodes.map { "${it.canonicalName} (${it.pronouns})" }}")
         Log.i(TAG, "memoryBlock:\n${CharacterGraph.memoryBlock(bookId, 0)}")

@@ -1930,13 +1930,9 @@ class ReadActivityViewModel : ViewModel() {
             refreshChapters()
         }
 
-    private var _llmDownloads: com.lagradost.quicknovel.llm.LlmModelDownloadManager? = null
-    fun llmDownloads(context: Context): com.lagradost.quicknovel.llm.LlmModelDownloadManager =
-        _llmDownloads ?: com.lagradost.quicknovel.llm.LlmModelDownloadManager(context).also { _llmDownloads = it }
-
+    /** Kick off a BACKGROUND (WorkManager) model download so it survives the reader being closed. */
     fun downloadLlmModel(context: Context, id: String) {
-        val mgr = llmDownloads(context)
-        viewModelScope.launch { mgr.download(id) }
+        com.lagradost.quicknovel.llm.LlmModelDownloadManager.startBackgroundDownload(context, id)
     }
 
     private fun llmBookId(): String? = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()

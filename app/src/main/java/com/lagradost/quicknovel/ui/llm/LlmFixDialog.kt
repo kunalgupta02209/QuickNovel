@@ -9,6 +9,7 @@ import com.lagradost.quicknovel.R
 import com.lagradost.quicknovel.ReadActivity2
 import com.lagradost.quicknovel.ReadActivityViewModel
 import com.lagradost.quicknovel.databinding.LlmFixPanelBinding
+import com.lagradost.quicknovel.llm.LlmModelDownloadManager
 import com.lagradost.quicknovel.llm.LlmModels
 import com.lagradost.quicknovel.llm.ProseFixPrompt
 import com.lagradost.quicknovel.tts.ModelDownloadState
@@ -48,8 +49,9 @@ object LlmFixDialog {
             it.isEnabled = false
             viewModel.downloadLlmModel(activity, def.id)
         }
+        LlmModelDownloadManager.refreshFromDisk(activity)
         activity.lifecycleScope.launch {
-            viewModel.llmDownloads(activity).states.collectLatest { states ->
+            LlmModelDownloadManager.states.collectLatest { states ->
                 when (val s = states[def.id]) {
                     is ModelDownloadState.Downloading -> {
                         b.llmModelDownload.visibility = View.GONE
@@ -125,6 +127,17 @@ object LlmFixDialog {
             }
             persistSettings()
             LlmBackgroundDialog.show(activity, viewModel)
+            dialog.dismiss()
+        }
+
+        // ---- build character map (first N chapters, extract only) ----
+        b.llmBuildGraph.setOnClickListener {
+            if (!LlmModels.isReady(activity, def)) {
+                Toast.makeText(activity, R.string.llm_model_not_ready, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            persistSettings()
+            LlmBackgroundDialog.show(activity, viewModel, graphOnly = true)
             dialog.dismiss()
         }
 

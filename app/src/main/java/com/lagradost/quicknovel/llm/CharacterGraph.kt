@@ -33,7 +33,7 @@ data class CharacterNode(
  * whole point of this feature for machine-translated novels (Chinese 他/她 are both "ta").
  */
 object CharacterGraph {
-    data class GraphData(val nodes: List<CharacterNode> = emptyList())
+    data class GraphData(val nodes: List<CharacterNode> = emptyList(), val setting: String = "")
 
     /** DTO for the model's JSON extraction output (tolerant of extra/missing keys). */
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -46,11 +46,19 @@ object CharacterGraph {
         @JsonProperty("relationships") val relationships: List<CharRel> = emptyList(),
     )
 
-    fun load(bookId: String): List<CharacterNode> =
-        runCatching { getKey<GraphData>(CHAR_GRAPH_FOLDER, bookId) }.getOrNull()?.nodes ?: emptyList()
+    private fun loadGraph(bookId: String): GraphData =
+        runCatching { getKey<GraphData>(CHAR_GRAPH_FOLDER, bookId) }.getOrNull() ?: GraphData()
 
-    private fun save(bookId: String, nodes: List<CharacterNode>) {
-        runCatching { setKey(CHAR_GRAPH_FOLDER, bookId, GraphData(nodes)) }
+    fun load(bookId: String): List<CharacterNode> = loadGraph(bookId).nodes
+    fun setting(bookId: String): String = loadGraph(bookId).setting
+
+    private fun saveNodes(bookId: String, nodes: List<CharacterNode>) {
+        runCatching { setKey(CHAR_GRAPH_FOLDER, bookId, loadGraph(bookId).copy(nodes = nodes)) }
+    }
+
+    fun saveSetting(bookId: String, setting: String) {
+        if (setting.isBlank()) return
+        runCatching { setKey(CHAR_GRAPH_FOLDER, bookId, loadGraph(bookId).copy(setting = setting.trim())) }
     }
 
     fun clear(bookId: String) {
@@ -61,8 +69,10 @@ object CharacterGraph {
 
     /** Build the Cytoscape.js elements JSON (nodes + resolved relationship edges) for the graph WebView. */
     fun toCytoscapeJson(bookId: String): String {
-        val nodes = load(bookId)
-        if (nodes.isEmpty()) return """{"elements":[]}"""
+        val g = loadGraph(bookId)
+        val nodes = g.nodes
+        if (nodes.isEmpty())
+            return DataStore.mapper.writeValueAsString(mapOf("elements" to emptyList<Any>(), "setting" to g.setting))
         val byName = HashMap<String, String>()
         for (n in nodes) {
             byName[n.canonicalName.trim().lowercase()] = n.id
@@ -98,7 +108,7 @@ object CharacterGraph {
             )
         }
         elements.addAll(edges)
-        return DataStore.mapper.writeValueAsString(mapOf("elements" to elements))
+        return DataStore.mapper.writeValueAsString(mapOf("elements" to elements, "setting" to g.setting))
     }
 
     private fun charId(name: String): String =
@@ -149,19 +159,22 @@ object CharacterGraph {
                 )
             }
         }
-        save(bookId, nodes)
+        saveNodes(bookId, nodes)
     }
 
     /** Recency + role scored memory block for the {character_memory} slot (kept to a small char budget). */
     fun memoryBlock(bookId: String, currentChapter: Int, maxChars: Int = 1100): String {
-        val nodes = load(bookId)
-        if (nodes.isEmpty()) return ""
+        val g = loadGraph(bookId)
+        val nodes = g.nodes
+        val sb0 = StringBuilder()
+        if (g.setting.isNotBlank()) sb0.append("Setting: ").append(g.setting.take(300)).append("\n")
+        if (nodes.isEmpty()) return sb0.toString().trim()
         val ranked = nodes.sortedWith(
             compareByDescending<CharacterNode> { it.chapterAppearances.contains(currentChapter) }
                 .thenBy { currentChapter - it.updatedAtChapter }
                 .thenByDescending { it.chapterAppearances.size }
         )
-        val sb = StringBuilder()
+        val sb = StringBuilder(sb0)
         for (n in ranked) {
             val line = buildString {
                 append(n.canonicalName)
