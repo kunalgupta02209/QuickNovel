@@ -1,0 +1,36 @@
+# QuickNovel LLM fix server config.
+# HOT-RELOADED on change (no restart) — edit while the server runs and it picks it up.
+# Copy to config.yaml and edit for your setup.
+
+# Ollama base URL. From inside Docker, reach the host's Ollama via host.docker.internal.
+ollama_base_url: "http://host.docker.internal:11434"
+
+default_model: "qwen2.5-3b"
+
+# Rewrite chapters in chunks of this many characters (fits the model context + leaves room to generate).
+chunk_chars: 4000
+
+# When true, every input/output pair is appended to samples/samples.jsonl for testing.
+# Toggle at runtime WITHOUT restart: edit this file, or POST /config/store_samples?on=true
+store_samples: false
+
+# Sampling — server models can use a real repeat penalty (unlike the on-device binding).
+temperature: 0.4
+frequency_penalty: 0.3
+presence_penalty: 0.1
+
+# Models offered to the app (GET /models). `litellm` is the LiteLLM model string.
+models:
+  - id: "qwen2.5-3b"
+    name: "Qwen2.5 3B Instruct (Ollama, GPU)"
+    litellm: "ollama/qwen2.5:3b"
+  - id: "qwen2.5-7b"
+    name: "Qwen2.5 7B Instruct (Ollama, GPU)"
+    litellm: "ollama/qwen2.5:7b"
+  - id: "gemma2-9b"
+    name: "Gemma 2 9B (Ollama, GPU)"
+    litellm: "ollama/gemma2:9b"
+  # Cloud examples — set the provider key as an env var (e.g. OPENAI_API_KEY):
+  # - id: "gpt-4o-mini"
+  #   name: "GPT-4o mini"
+  #   litellm: "openai/gpt-4o-mini"

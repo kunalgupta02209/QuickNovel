@@ -1,0 +1,39 @@
+# QuickNovel LLM fix server.
+#   docker compose up --build
+# Reaches a GPU model host (Ollama) on your machine via host.docker.internal, OR uncomment the
+# `ollama` service below to run it in-compose with GPU passthrough.
+
+services:
+  fixserver:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the WHOLE app dir so code + prompt + config changes hot-reload (point 7).
+      - ./:/app
+    environment:
+      - LOG_LEVEL=INFO
+      - LITELLM_LOG=WARNING
+      # If you run the optional ollama service below, point at it instead of the host:
+      # - OLLAMA_BASE_URL=http://ollama:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # so the container can reach a host-run Ollama
+    restart: unless-stopped
+
+  # Optional: run Ollama (GPU) in-compose instead of on the host.
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
+# volumes:
+#   ollama:
