@@ -4,6 +4,9 @@ import android.os.Build
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.lagradost.quicknovel.llm.ChapterFixer
+import com.lagradost.quicknovel.llm.CharacterGraph
+import com.lagradost.quicknovel.llm.FixedTextCache
 import com.lagradost.quicknovel.llm.LlamaCppProseFixer
 import com.lagradost.quicknovel.llm.LlmModels
 import com.lagradost.quicknovel.llm.ProseFixPrompt
@@ -65,5 +68,41 @@ class LlmSmokeTest {
         Assert.assertTrue("output should be non-empty", fixed.isNotBlank())
         // Sanity: it must preserve the proper noun and drop the digit "5".
         Assert.assertTrue("should preserve the name Lin Xuan", fixed.contains("Lin Xuan"))
+    }
+
+    /** P2 (ChapterFixer + FixedTextCache) and P3 (CharacterGraph extraction -> merge -> graph JSON). */
+    @Test
+    fun chapterFixerCachesAndBuildsGraph() = runBlocking {
+        Assume.assumeTrue("LLM engine requires API 24+", Build.VERSION.SDK_INT >= 24)
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val def = LlmModels.byId("qwen2.5-0.5b")
+        if (!LlmModels.isReady(ctx, def)) LlmModels.downloadModel(ctx, def) { }
+
+        val bookId = "test-book-smoke"
+        CharacterGraph.clear(bookId)
+        FixedTextCache.deleteBook(ctx, bookId)
+        val cfg = ChapterFixer.FixConfig("qwen2.5-0.5b", 1, "", false)
+        val raw = "Lin Xuan gege walk into the hall. Su Ling she was a strong swordswoman, and she give him a sword. " +
+                "The 3 disciples was afraid of her."
+
+        // P2: fix + cache
+        val fixed = ChapterFixer.fixChapter(ctx, bookId, 0, raw, "", cfg)
+        Log.i(TAG, "===== P2 FIXED =====\n$fixed")
+        Assert.assertFalse("fixChapter should return text", fixed.isNullOrBlank())
+        Assert.assertTrue("chapter should be cached", FixedTextCache.isFixed(ctx, bookId, "qwen2.5-0.5b", 1, 0))
+        val cached = ChapterFixer.fixChapter(ctx, bookId, 0, raw, "", cfg) // 2nd call = cache hit (instant)
+        Assert.assertEquals("2nd call should return cached identical text", fixed, cached)
+
+        // P3: extract characters -> merge -> graph
+        ChapterFixer.extractCharacters(ctx, bookId, 0, fixed!!, cfg)
+        val nodes = CharacterGraph.load(bookId)
+        Log.i(TAG, "===== P3 GRAPH: ${nodes.size} nodes =====\n${nodes.map { "${it.canonicalName} (${it.pronouns})" }}")
+        Log.i(TAG, "memoryBlock:\n${CharacterGraph.memoryBlock(bookId, 0)}")
+        Log.i(TAG, "cytoscape JSON: ${CharacterGraph.toCytoscapeJson(bookId).take(400)}")
+        // The 0.5B model's JSON can be imperfect; extraction is best-effort, so log rather than hard-assert count.
+
+        ChapterFixer.releaseEngine()
+        CharacterGraph.clear(bookId)
+        FixedTextCache.deleteBook(ctx, bookId)
     }
 }

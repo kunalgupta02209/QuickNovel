@@ -53,7 +53,6 @@ object ChapterFixer {
         chapterIndex: Int,
         rawText: String,
         previousChapters: String,
-        characterMemory: String,
         cfg: FixConfig,
     ): String? {
         FixedTextCache.load(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex)?.let { return it }
@@ -63,7 +62,7 @@ object ChapterFixer {
             val prompt = ProseFixPrompt.buildFixPrompt(
                 systemPrompt = cfg.systemPrompt,
                 previousChapters = previousChapters,
-                characterMemory = characterMemory,
+                characterMemory = CharacterGraph.memoryBlock(bookId, chapterIndex), // cross-chapter consistency
                 chapterText = rawText,
                 supertonic = cfg.supertonic,
             )
@@ -75,6 +74,22 @@ object ChapterFixer {
             }
         } catch (t: Throwable) {
             logError(t); null
+        }
+    }
+
+    /**
+     * Extract characters from a chapter's fixed text and merge them into the book's memory graph.
+     * A second LLM pass, so only the background worker runs it (never the on-the-spot fix).
+     */
+    suspend fun extractCharacters(context: Context, bookId: String, chapterIndex: Int, fixedText: String, cfg: FixConfig) {
+        if (fixedText.isBlank()) return
+        val e = ensureEngine(context, cfg.modelId) ?: return
+        try {
+            val prompt = ProseFixPrompt.buildExtractPrompt(CharacterGraph.knownNames(bookId).take(40), fixedText.take(6000))
+            val extracted = CharacterGraph.parseExtraction(e.generate(prompt))
+            CharacterGraph.merge(bookId, extracted, chapterIndex)
+        } catch (t: Throwable) {
+            logError(t)
         }
     }
 

@@ -1987,7 +1987,7 @@ class ReadActivityViewModel : ViewModel() {
         val prev = buildPreviousContext(index)
         onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
         val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic())
-        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, "", cfg)
+        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, cfg)
         if (fixed != null) {
             llmShowFixedKey = true
             refreshChapters()

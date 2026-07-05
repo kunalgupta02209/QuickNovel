@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  html,body{margin:0;height:100%;background:#0e0f13;overflow:hidden;font-family:-apple-system,Roboto,sans-serif}
+  #cy{width:100%;height:100%;display:block}
+  #detail{position:fixed;left:12px;right:12px;bottom:12px;background:#17181d;border:1px solid #2a2c34;
+    border-radius:14px;padding:14px 16px;color:#e8e9ee;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  #detail h3{margin:0 0 4px;font-size:16px}
+  #detail .p{color:#cfd4ff;font-size:12px;margin-bottom:6px}
+  #detail .r{color:#9aa0ab;font-size:12px;margin-top:4px;line-height:1.5}
+  #detail .x{position:absolute;top:10px;right:14px;color:#9aa0ab;font-size:18px}
+  #empty{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa0ab;font-size:15px}
+</style>
+</head>
+<body>
+  <div id="cy"></div>
+  <div id="empty">No characters extracted yet</div>
+  <div id="detail"><span class="x" onclick="hideDetail()">×</span><h3 id="dn"></h3><div class="p" id="dp"></div><div class="r" id="dr"></div></div>
+
+  <script src="layout-base.js"></script>
+  <script src="cose-base.js"></script>
+  <script src="cytoscape.min.js"></script>
+  <script src="cytoscape-fcose.js"></script>
+  <script>
+    var cy = null;
+    function hideDetail(){ document.getElementById('detail').style.display='none'; }
+    function showDetail(d){
+      document.getElementById('dn').textContent = d.label || '';
+      document.getElementById('dp').textContent = (d.pronouns ? d.pronouns + '  ·  ' : '') + (d.aliases || '');
+      document.getElementById('dr').textContent = d.detail || '';
+      document.getElementById('detail').style.display='block';
+    }
+    // Called from Kotlin: renderGraph('{"elements":[...]}')
+    function renderGraph(json){
+      var data = (typeof json === 'string') ? JSON.parse(json) : json;
+      var els = data.elements || [];
+      document.getElementById('empty').style.display = els.length ? 'none' : 'flex';
+      if(cy){ cy.destroy(); cy = null; }
+      if(!els.length) return;
+      cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: els,
+        style: [
+          { selector: 'node', style: {
+              'background-color': '#6d78ff', 'label': 'data(label)', 'color': '#fff',
+              'font-size': '11px', 'text-valign': 'center', 'text-halign': 'center',
+              'text-outline-color': '#0e0f13', 'text-outline-width': 2,
+              'width': 'mapData(deg, 0, 6, 26, 60)', 'height': 'mapData(deg, 0, 6, 26, 60)' } },
+          { selector: 'node[gender = "female"]', style: { 'background-color': '#a06bff' } },
+          { selector: 'node[gender = "male"]', style: { 'background-color': '#5a86ff' } },
+          { selector: 'edge', style: {
+              'width': 1.4, 'line-color': '#3a3d48', 'curve-style': 'bezier',
+              'label': 'data(label)', 'font-size': '8px', 'color': '#7a7f8c',
+              'text-rotation': 'autorotate' } }
+        ],
+        layout: { name: 'fcose', animate: false, nodeSeparation: 90, idealEdgeLength: 90 },
+        minZoom: 0.2, maxZoom: 3
+      });
+      cy.on('tap', 'node', function(e){ showDetail(e.target.data()); });
+      cy.on('tap', function(e){ if(e.target === cy) hideDetail(); });
+    }
+  </script>
+</body>
+</html>

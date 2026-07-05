@@ -131,6 +131,7 @@ object LlmBackgroundDialog {
             textSize = 12f; alpha = 0.7f; setTextColor(tc)
         })
         val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        btns.addView(textBtn(ctx, R.string.llm_graph_title) { CharacterGraphDialog.show(ctx, "b${rec.bookId}") })
         btns.addView(textBtn(ctx, R.string.tts_pregen_delete) { LlmFixManager.deleteAll(ctx, rec.key); renderRecords(ctx, b) })
         root.addView(btns)
         return root

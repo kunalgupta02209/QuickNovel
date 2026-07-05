@@ -107,8 +107,10 @@ object LlmFixManager {
                         val raw = readRawChapter(ctx, req, index, authorNotes)
                         if (raw != null) {
                             val prev = buildPrevContext(ctx, req, index, authorNotes)
-                            val out = ChapterFixer.fixChapter(ctx, req.bookIdStr, index, raw, prev, "", cfg)
+                            val out = ChapterFixer.fixChapter(ctx, req.bookIdStr, index, raw, prev, cfg)
                             if (out == null && peekStop(key)) { finalState = DownloadState.IsStopped; break@loop }
+                            // Populate the character memory graph from the fixed text (background only).
+                            if (out != null) ChapterFixer.extractCharacters(ctx, req.bookIdStr, index, out, cfg)
                         }
                     }
                     done++
