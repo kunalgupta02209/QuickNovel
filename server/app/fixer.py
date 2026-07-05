@@ -9,6 +9,10 @@ from .prompts import prompts
 
 log = logging.getLogger("fixer")
 
+# Drop provider-unsupported sampling params instead of erroring — e.g. Ollama rejects
+# presence_penalty/frequency_penalty, while OpenAI-style providers accept them.
+litellm.drop_params = True
+
 
 def split_chunks(text: str, max_chars: int) -> list[str]:
     """Split a chapter into <= max_chars chunks on paragraph boundaries (hard-splitting giants)."""

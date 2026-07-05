@@ -7,7 +7,8 @@ services:
   fixserver:
     build: .
     ports:
-      - "8000:8000"
+      # Host 8077 -> container 8000 (host 8000 is often taken by other dev servers).
+      - "8077:8000"
     volumes:
       # Mount the WHOLE app dir so code + prompt + config changes hot-reload (point 7).
       - ./:/app
