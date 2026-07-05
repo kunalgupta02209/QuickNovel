@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/primaryGrayBackground"
+    android:maxHeight="640dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/llm_fix_title"
+            android:textColor="?attr/textColor"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/llm_fix_subtitle"
+            android:textColor="?attr/textColor"
+            android:alpha="0.7"
+            android:textSize="13sp" />
+
+        <!-- Fixed / Original toggle (shown only when a fix exists for this chapter) -->
+        <LinearLayout
+            android:id="@+id/llm_toggle_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/llm_toggle_original"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/llm_show_original" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/llm_toggle_fixed"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="@string/llm_show_fixed" />
+        </LinearLayout>
+
+        <!-- Model row -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/llm_model"
+            android:textColor="?attr/textColor"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/llm_model_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="?attr/textColor"
+            android:textSize="13sp"
+            tools:text="Qwen2.5 1.5B Instruct (int4) · 1.12 GB" />
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/llm_model_progress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:visibility="gone"
+            app:indicatorColor="?attr/colorPrimary" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/llm_model_download"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/llm_download_model" />
+
+        <!-- System prompt -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/llm_system_prompt"
+                android:textColor="?attr/textColor"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/llm_prompt_reset"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="4dp"
+                android:text="@string/llm_reset_prompt"
+                android:textColor="?attr/colorPrimary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/llm_system_prompt"
+            android:layout_width="match_parent"
+            android:layout_height="140dp"
+            android:layout_marginTop="6dp"
+            android:background="?attr/primaryBlackBackground"
+            android:gravity="top|start"
+            android:inputType="textMultiLine"
+            android:padding="10dp"
+            android:textColor="?attr/textColor"
+            android:textSize="12sp"
+            android:importantForAutofill="no"
+            tools:ignore="LabelFor" />
+
+        <!-- Previous chapters context -->
+        <TextView
+            android:id="@+id/llm_prev_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textColor="?attr/textColor"
+            android:textSize="15sp"
+            tools:text="Previous chapters for context  2" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/llm_prev_slider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="1"
+            android:value="2"
+            android:valueFrom="0"
+            android:valueTo="3" />
+
+        <TextView
+            android:id="@+id/llm_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="?attr/colorPrimary"
+            android:textSize="13sp"
+            android:visibility="gone"
+            tools:text="Fixing with Qwen2.5 1.5B…" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/llm_fix_chapter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="@string/llm_fix_this_chapter"
+            app:icon="@drawable/ic_auto_fix" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/llm_fix_whole"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/llm_fix_whole_novel" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

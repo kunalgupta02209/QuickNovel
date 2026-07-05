@@ -204,6 +204,29 @@
     <string name="tts_pregen_sync">Sync to latest</string>
     <string name="tts_pregen_delete">Delete</string>
     <string name="tts_pregen_manage">Pre-generate / manage audio</string>
+
+    <!-- On-device LLM prose fixer -->
+    <string name="llm_fix_title">Fix / rewrite with AI</string>
+    <string name="llm_fix_subtitle">Rewrite this machine-translated chapter into clean, natural English for reading and TTS.</string>
+    <string name="llm_fix_this_chapter">Fix this chapter</string>
+    <string name="llm_fix_whole_novel">Fix whole novel in background…</string>
+    <string name="llm_system_prompt">System prompt</string>
+    <string name="llm_prev_chapters">Previous chapters for context</string>
+    <string name="llm_model">Model</string>
+    <string name="llm_model_not_ready">Download the fixer model below first</string>
+    <string name="llm_download_model">Download model</string>
+    <string name="llm_fixing_loading">Reading chapter…</string>
+    <string name="llm_fixing_running">Fixing with %1$s… this can take a while</string>
+    <string name="llm_fixed_done">Chapter rewritten</string>
+    <string name="llm_fix_failed">Could not rewrite this chapter</string>
+    <string name="llm_show_fixed">Fixed</string>
+    <string name="llm_show_original">Original</string>
+    <string name="llm_reset_prompt">Reset</string>
+    <string name="llm_device_ram">This device: %1$d GB RAM</string>
+    <string name="llm_background_title">Rewrite chapters in background</string>
+    <string name="llm_manage_existing">Rewritten novels</string>
+    <string name="llm_graph_title">Characters</string>
+    <string name="llm_graph_empty">No characters extracted yet</string>
     <string name="tts_download_model">Download voice model</string>
     <string name="tts_delete_model">Delete model</string>
     <string name="tts_model_not_downloaded">Download an on-device voice model first</string>

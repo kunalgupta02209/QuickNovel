@@ -882,7 +882,8 @@ class ReadActivityViewModel : ViewModel() {
             val data = safeApiCall {
                 book.getChapterData(index, reload)
             }.map { text ->
-                val rawText = preParseHtml(text, authorNotes)
+                // Substitute LLM-fixed prose for the raw body when "show fixed" is on and a fix is cached.
+                val rawText = preParseHtml(maybeFixedText(context, index, text), authorNotes)
                 // val renderedBuilder = SpannableStringBuilder()
                 // val lengths : IntArray
                 // val nodes : Array<Node>
@@ -1909,6 +1910,90 @@ class ReadActivityViewModel : ViewModel() {
             ttsGapKey = value.coerceIn(0, 2000)
             (ttsSession as? OnDeviceTtsEngine)?.updateGapMs(ttsGapKey)
         }
+
+    // ---- On-device LLM prose fixer ----
+    private var llmModelKey by PreferenceDelegate(LLM_FIX_MODEL, "qwen2.5-1.5b", String::class)
+    var llmModel: String
+        get() = llmModelKey
+        set(value) { llmModelKey = value }
+    var llmSystemPrompt by PreferenceDelegate(LLM_FIX_SYSTEM_PROMPT, "", String::class)
+    var llmPromptVersion by PreferenceDelegate(LLM_FIX_PROMPT_VERSION, 1, Int::class)
+    var llmPrevChapters by PreferenceDelegate(LLM_FIX_PREV_CHAPTERS, 2, Int::class)
+
+    private var llmShowFixedKey by PreferenceDelegate(LLM_FIX_SHOW_FIXED, false, Boolean::class)
+    /** Whether the reader currently substitutes LLM-fixed text for the original. Toggling reloads. */
+    var llmShowFixed: Boolean
+        get() = llmShowFixedKey
+        set(value) {
+            if (value == llmShowFixedKey) return
+            llmShowFixedKey = value
+            refreshChapters()
+        }
+
+    private var _llmDownloads: com.lagradost.quicknovel.llm.LlmModelDownloadManager? = null
+    fun llmDownloads(context: Context): com.lagradost.quicknovel.llm.LlmModelDownloadManager =
+        _llmDownloads ?: com.lagradost.quicknovel.llm.LlmModelDownloadManager(context).also { _llmDownloads = it }
+
+    fun downloadLlmModel(context: Context, id: String) {
+        val mgr = llmDownloads(context)
+        viewModelScope.launch { mgr.download(id) }
+    }
+
+    private fun llmBookId(): String? = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
+
+    /** Whether a fixed version of [index] exists for the current model+prompt. */
+    fun hasFixedChapter(context: Context, index: Int): Boolean {
+        val id = llmBookId() ?: return false
+        return com.lagradost.quicknovel.llm.FixedTextCache.isFixed(context, id, llmModel, llmPromptVersion, index)
+    }
+
+    /** Substitute LLM-fixed text for the raw chapter body when the user has "show fixed" on. */
+    private fun maybeFixedText(context: Context?, index: Int, raw: String): String {
+        if (!llmShowFixedKey || context == null) return raw
+        val id = llmBookId() ?: return raw
+        return com.lagradost.quicknovel.llm.FixedTextCache.load(context, id, llmModel, llmPromptVersion, index) ?: raw
+    }
+
+    private fun llmSupertonic(): Boolean =
+        ttsEngineType == TtsEngineType.ON_DEVICE && ttsOnDeviceModel == "supertonic"
+
+    private suspend fun buildPreviousContext(index: Int): String {
+        val n = llmPrevChapters.coerceIn(0, 3)
+        if (n <= 0) return ""
+        val sb = StringBuilder()
+        for (i in maxOf(0, index - n) until index) {
+            val r = safeApiCall { book.getChapterData(i, false) }
+            val t = (r as? Resource.Success)?.value?.let { preParseHtml(it, authorNotes) } ?: continue
+            sb.append(t.takeLast(1500)).append("\n\n")
+        }
+        return sb.toString().takeLast(3000)
+    }
+
+    /**
+     * Fix the currently-shown chapter on the spot: read it, gather previous-chapter context, run the
+     * LLM, cache the result, then flip to "show fixed" and reload. [onState] reports coarse progress;
+     * [onDone] fires with success. Heavy (minutes on mid-range) — runs entirely off the main thread.
+     */
+    fun fixCurrentChapter(context: Context, onState: (String) -> Unit, onDone: (Boolean) -> Unit) = ioSafe {
+        val index = currentIndex
+        val bookId = llmBookId() ?: return@ioSafe onDone(false)
+        if (!com.lagradost.quicknovel.llm.LlmModels.isReady(context, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel))) {
+            onState("Model not downloaded"); return@ioSafe onDone(false)
+        }
+        onState(context.getString(R.string.llm_fixing_loading))
+        val raw = safeApiCall { book.getChapterData(index, false) }
+        val rawText = (raw as? Resource.Success)?.value?.let { preParseHtml(it, authorNotes) }
+        if (rawText.isNullOrBlank()) return@ioSafe onDone(false)
+        val prev = buildPreviousContext(index)
+        onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
+        val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic())
+        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, "", cfg)
+        if (fixed != null) {
+            llmShowFixedKey = true
+            refreshChapters()
+            onDone(true)
+        } else onDone(false)
+    }
 
     private var _modelDownloads: ModelDownloadManager? = null
     fun modelDownloads(context: Context): ModelDownloadManager =

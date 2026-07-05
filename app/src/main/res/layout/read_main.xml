@@ -503,5 +503,20 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent" />
         </com.google.android.material.appbar.AppBarLayout>
+
+        <!-- Top-right "fix / rewrite with AI" button — opens the LLM prose-fixer panel. -->
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/read_llm_fix"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="30dp"
+            android:layout_marginEnd="12dp"
+            android:alpha="0.85"
+            android:contentDescription="@string/llm_fix_title"
+            android:src="@drawable/ic_auto_fix"
+            app:backgroundTint="?attr/colorPrimary"
+            app:fabSize="mini"
+            app:tint="@android:color/white" />
     </FrameLayout>
 </FrameLayout>

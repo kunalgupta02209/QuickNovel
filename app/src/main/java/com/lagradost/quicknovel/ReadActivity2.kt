@@ -960,6 +960,15 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             viewModel.startTTS()
         }
 
+        // Top-right "fix / rewrite with AI" button — requires API 24 (the llama.cpp binding's minSdk).
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            binding.readLlmFix.setOnClickListener {
+                com.lagradost.quicknovel.ui.llm.LlmFixDialog.show(this, viewModel)
+            }
+        } else {
+            binding.readLlmFix.visibility = android.view.View.GONE
+        }
+
         binding.ttsActionForward.setOnClickListener {
             viewModel.forwardsTTS()
         }

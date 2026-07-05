@@ -58,6 +58,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".LlmFixNotificationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- WorkManager hosts foreground workers in its own SystemForegroundService; on Android 12+
              its foregroundServiceType must include the type we pass to setForeground (dataSync),
              so merge it into the library's service declaration. -->
