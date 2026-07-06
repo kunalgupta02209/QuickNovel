@@ -20,8 +20,36 @@ litellm.drop_params = True
 _gpu_sem = asyncio.Semaphore(1)
 
 
+_SENTENCE = re.compile(r"(?<=[.!?…”\"'])\s+")
+
+
+def _split_sentences(paragraph: str, max_chars: int) -> list[str]:
+    """Pack a too-long paragraph into <= max_chars pieces on SENTENCE boundaries (never mid-sentence,
+    unless a single sentence itself exceeds max_chars — then hard-split as a last resort)."""
+    out: list[str] = []
+    buf = ""
+    for s in _SENTENCE.split(paragraph):
+        s = s.strip()
+        if not s:
+            continue
+        if len(s) > max_chars:
+            if buf:
+                out.append(buf.strip()); buf = ""
+            for i in range(0, len(s), max_chars):
+                out.append(s[i : i + max_chars].strip())
+        elif len(buf) + len(s) + 1 > max_chars:
+            out.append(buf.strip()); buf = s + " "
+        else:
+            buf += s + " "
+    if buf.strip():
+        out.append(buf.strip())
+    return out
+
+
 def split_chunks(text: str, max_chars: int) -> list[str]:
-    """Split a chapter into <= max_chars chunks on paragraph boundaries (hard-splitting giants)."""
+    """Pack whole paragraphs into <= max_chars chunks; oversized paragraphs are split on sentence
+    boundaries so every chunk the model rewrites ends cleanly (no mid-sentence cuts). Keeping chunks
+    below the context budget (with room to generate) is what keeps generation fast + coherent."""
     paras = re.split(r"\n\s*\n", text)
     chunks: list[str] = []
     cur = ""
@@ -31,11 +59,9 @@ def split_chunks(text: str, max_chars: int) -> list[str]:
             continue
         if len(p) > max_chars:
             if cur:
-                chunks.append(cur.strip())
-                cur = ""
-            for i in range(0, len(p), max_chars):
-                chunks.append(p[i : i + max_chars].strip())
-        elif len(cur) + len(p) > max_chars:
+                chunks.append(cur.strip()); cur = ""
+            chunks.extend(_split_sentences(p, max_chars))
+        elif len(cur) + len(p) + 2 > max_chars:
             chunks.append(cur.strip())
             cur = p + "\n\n"
         else:
@@ -95,12 +121,19 @@ async def fix_text(
     # made single chunks run for minutes / time out.
     if is_ollama:
         sampling["repeat_penalty"] = 1.3
+        sampling["num_ctx"] = config.num_ctx  # smaller context -> smaller KV cache -> more fits on GPU
+
+    # Previous-chapter context bloats the prompt (slower eval); gate it behind a config flag.
+    prev = previous_chapters if config.send_previous_chapters else ""
 
     chunks = split_chunks(text, config.chunk_chars)
-    log.info("fix start: model=%s chars=%d chunks=%d", litellm_model, len(text), len(chunks))
+    log.info(
+        "fix start: model=%s chars=%d chunks=%d ctx=%d prev=%s",
+        litellm_model, len(text), len(chunks), config.num_ctx, bool(prev),
+    )
     parts: list[str] = []
     for i, chunk in enumerate(chunks):
-        messages = _build_messages(system, chunk, previous_chapters if i == 0 else "", character_memory)
+        messages = _build_messages(system, chunk, prev if i == 0 else "", character_memory)
         # A rewrite is ~the input length; hard-cap generation so a looping model can't run away.
         max_gen = min(1536, len(chunk) // 3 + 256)
         async with _gpu_sem:

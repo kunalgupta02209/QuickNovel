@@ -11,8 +11,12 @@ ollama_base_url: "http://localhost:11434"
 # (100% GPU, ~65 tok/s) but embellishes. Switch to taste.
 default_model: "gemma2-2b"
 
-# Rewrite chapters in chunks of this many characters (fits the model context + leaves room to generate).
-chunk_chars: 4000
+# Rewrite chapters in chunks of this many characters (must fit num_ctx with room to generate).
+chunk_chars: 2200
+# Model context window. Smaller = smaller KV cache = more of the model fits on the GPU = faster.
+num_ctx: 2048
+# Send the previous chapters as context (better pronoun consistency, but a bigger/slower prompt).
+send_previous_chapters: false
 
 # When true, every input/output pair is appended to samples/samples.jsonl for testing.
 # Toggle at runtime WITHOUT restart: edit this file, or POST /config/store_samples?on=true

@@ -58,7 +58,15 @@ class Config:
 
     @property
     def chunk_chars(self) -> int:
-        return int(self.get("chunk_chars", 4000))
+        return int(self.get("chunk_chars", 2200))
+
+    @property
+    def num_ctx(self) -> int:
+        return int(self.get("num_ctx", 2048))
+
+    @property
+    def send_previous_chapters(self) -> bool:
+        return bool(self.get("send_previous_chapters", False))
 
     @property
     def sampling(self) -> dict:
