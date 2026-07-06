@@ -6,8 +6,10 @@
 # (http://host.docker.internal:11434) so the container reaches the host's Ollama.
 ollama_base_url: "http://localhost:11434"
 
-# 1.5b fits fully in a 4 GB GPU (100% GPU) -> fast. Bigger models spill to CPU on small GPUs.
-default_model: "qwen2.5-1.5b"
+# gemma2-2b gives the most FAITHFUL rewrites (others hallucinate/leak/refuse). ~3.6 GB loaded so
+# ~half spills to CPU on a 4 GB GPU, still ~53 tok/s GPU / ~21 CPU-only. qwen2.5-1.5b is faster
+# (100% GPU, ~65 tok/s) but embellishes. Switch to taste.
+default_model: "gemma2-2b"
 
 # Rewrite chapters in chunks of this many characters (fits the model context + leaves room to generate).
 chunk_chars: 4000
@@ -32,6 +34,9 @@ models:
   - id: "qwen2.5-0.5b"
     name: "Qwen2.5 0.5B (Ollama · fastest, CPU-friendly)"
     litellm: "ollama/qwen2.5:0.5b"
+  - id: "gemma2-2b"
+    name: "Gemma 2 2B (Ollama · best quality; ~half on GPU)"
+    litellm: "ollama/gemma2:2b"
   - id: "qwen2.5-3b"
     name: "Qwen2.5 3B Instruct (Ollama · needs >4 GB VRAM)"
     litellm: "ollama/qwen2.5:3b"
