@@ -15,20 +15,26 @@ docker compose up --build                  # server on http://<host>:8000, hot-r
 
 Point the app at `http://<your-machine-ip>:8000` in Read-aloud → LLM fixer settings.
 
-## Local (no Docker)
+## Local (no Docker) — with [uv](https://docs.astral.sh/uv/)
+
+The project is managed by **uv** (`pyproject.toml` + `uv.lock`). No manual venv/pip needed.
 
 ```bash
 cd server
-pip install -r requirements.txt
-cp config.example.yaml config.yaml
-uvicorn app.main:app --reload              # http://127.0.0.1:8000
+uv sync                                    # create .venv + install locked deps (one-time)
+cp config.example.yaml config.yaml         # edit models / ollama url
+uv run uvicorn app.main:app --reload       # http://127.0.0.1:8000
 ```
+
+`uv run` auto-syncs before running, so after editing `pyproject.toml` just run again.
+(Prefer pip? `pip install -r requirements.txt` still works — it mirrors the locked deps.)
 
 ## CLI playground (iterate on the system prompt)
 
 ```bash
-python cli.py "He walk to the store. She give him a apple."
-python cli.py --file chapter.txt --model qwen2.5-7b --prompt prompts/system_prompt.md
+uv run cli.py "He walk to the store. She give him a apple."
+uv run cli.py --file chapter.txt --model qwen2.5-7b --prompt prompts/system_prompt.md
+cat chapter.txt | uv run cli.py --quiet    # read from stdin
 ```
 
 ## API

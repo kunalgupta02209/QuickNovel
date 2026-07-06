@@ -1,0 +1,19 @@
+[project]
+name = "quicknovel-fix-server"
+version = "1.0.0"
+description = "GPU-backed LLM chapter-fix server for QuickNovel (FastAPI + LiteLLM)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "litellm==1.55.10",
+    "pyyaml==6.0.2",
+    "watchfiles==1.0.3",
+    "pydantic==2.10.4",
+]
+
+# This is a run-only application (a FastAPI service + a CLI), not a distributable library,
+# so uv manages the environment without trying to build/install the project itself.
+[tool.uv]
+package = false

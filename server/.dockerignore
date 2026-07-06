@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+logs/
+samples/
+static/
+.git/
+.python-version
