@@ -62,6 +62,7 @@ object LlmFixManager {
         val totalChapters: Int = 0,
         val bytes: Long = 0,
         val lastUpdated: Long = 0,
+        val serverJobId: String = "", // set when the range runs as a server /fix/batch job (resumable)
     ) {
         val key: String get() = "$bookId|$modelId|$promptVersion"
     }
@@ -71,6 +72,7 @@ object LlmFixManager {
     val records = HashMap<String, LlmFixRecord>()
     private val currentJobs = HashSet<String>()
     private val pendingAction = HashMap<String, DownloadActionType>()
+    private val serverJobIds = HashMap<String, String>() // key -> server /fix/batch job id
 
     val progressChanged = Event<Pair<String, DownloadProgressState>>()
     val recordChanged = Event<Pair<String, LlmFixRecord>>()
@@ -104,6 +106,11 @@ object LlmFixManager {
         try {
             if (req.serverUrl.isBlank() && !LlmModels.isReady(ctx, LlmModels.byId(req.modelId))) {
                 finalState = DownloadState.IsFailed
+            } else if (req.serverUrl.isNotBlank() && !req.graphOnly) {
+                // Whole-range rewrite runs as ONE server /fix/batch job — the server keeps working
+                // even if the app is killed; we poll it and write results into the cache.
+                val (state, d) = runServerBatch(ctx, req, authorNotes)
+                finalState = state; done = d
             } else {
                 emit(ctx, req, DownloadState.IsDownloading, 0, total)
                 loop@ for (index in req.rangeStart..req.rangeEnd) {
@@ -132,6 +139,59 @@ object LlmFixManager {
         } finally {
             emit(ctx, req, finalState, done, total)
             synchronized(lock) { currentJobs.remove(key); pendingAction.remove(key) }
+        }
+    }
+
+    /**
+     * Run the whole range as ONE server /fix/batch job. Submits the unfixed chapters (or resumes an
+     * existing job after an app restart), then polls, writing each fixed chapter into [FixedTextCache]
+     * as it lands. The server keeps generating even if the app is killed. Returns (finalState, done).
+     */
+    private suspend fun runServerBatch(ctx: Context, req: FixRequest, authorNotes: Boolean): Pair<DownloadState, Int> {
+        val key = req.key
+        val total = req.rangeEnd - req.rangeStart + 1
+        val items = ArrayList<Pair<String, String>>()
+        var alreadyFixed = 0
+        for (index in req.rangeStart..req.rangeEnd) {
+            if (FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index)) {
+                alreadyFixed++; continue
+            }
+            readRawChapter(ctx, req, index, authorNotes)?.let { items.add(index.toString() to it) }
+        }
+        emit(ctx, req, DownloadState.IsDownloading, alreadyFixed, total)
+        if (items.isEmpty()) return DownloadState.IsDone to total
+
+        // Resume a still-running server job if we have one; else submit a fresh batch.
+        val existing = synchronized(lock) { records[key]?.serverJobId }?.takeIf { it.isNotBlank() }
+        val resume = existing != null &&
+            RemoteFixClient.getJob(req.serverUrl, existing)?.status?.let { it == "running" || it == "queued" } == true
+        val jobId = if (resume) existing else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items)
+        if (jobId.isNullOrBlank()) return DownloadState.IsFailed to alreadyFixed
+        synchronized(lock) { serverJobIds[key] = jobId }
+        emit(ctx, req, DownloadState.IsDownloading, alreadyFixed, total) // persists the job id
+
+        val fetched = HashSet<String>()
+        while (true) {
+            if (peekStop(key)) {
+                RemoteFixClient.cancelJob(req.serverUrl, jobId)
+                return DownloadState.IsStopped to (alreadyFixed + fetched.size)
+            }
+            val job = RemoteFixClient.getJob(req.serverUrl, jobId)
+                ?: return DownloadState.IsFailed to (alreadyFixed + fetched.size)
+            for (r in job.results) {
+                if (r.fixed.isNotBlank() && fetched.add(r.id)) {
+                    r.id.toIntOrNull()?.let { idx ->
+                        FixedTextCache.save(ctx, req.bookIdStr, req.modelId, req.promptVersion, idx, r.fixed)
+                    }
+                    emit(ctx, req, DownloadState.IsDownloading, alreadyFixed + fetched.size, total)
+                }
+            }
+            when (job.status) {
+                "done" -> return DownloadState.IsDone to total
+                "error" -> return DownloadState.IsFailed to (alreadyFixed + fetched.size)
+                "cancelled" -> return DownloadState.IsStopped to (alreadyFixed + fetched.size)
+                else -> delay(2000)
+            }
         }
     }
 
@@ -174,9 +234,10 @@ object LlmFixManager {
         synchronized(lock) { progress[key] = p }
         progressChanged.invoke(key to p)
         val bytes = FixedTextCache.bytes(ctx, req.bookIdStr, req.modelId, req.promptVersion)
+        val sjid = synchronized(lock) { serverJobIds[key] ?: records[key]?.serverJobId ?: "" }
         val rec = LlmFixRecord(
             req.bookId, req.apiName, req.author, req.name, req.posterUrl, req.modelId, req.promptVersion,
-            req.rangeStart, req.rangeEnd, done, total, bytes, System.currentTimeMillis(),
+            req.rangeStart, req.rangeEnd, done, total, bytes, System.currentTimeMillis(), sjid,
         )
         synchronized(lock) { records[key] = rec }
         runCatching { setKey(LLM_FIX_FOLDER, key, rec) }

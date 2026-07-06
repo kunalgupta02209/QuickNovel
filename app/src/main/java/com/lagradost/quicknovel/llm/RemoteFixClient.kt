@@ -62,6 +62,33 @@ object RemoteFixClient {
         }.getOrElse { emptyList() }
     }
 
+    data class JobResult(val id: String = "", val fixed: String = "")
+    data class JobDetail(
+        val id: String = "",
+        val status: String = "",
+        val progress: Int = 0,
+        val total: Int = 0,
+        val error: String? = null,
+        val results: List<JobResult> = emptyList(),
+    )
+
+    fun getJob(baseUrl: String, id: String): JobDetail? {
+        val resp = request("GET", "${base(baseUrl)}/jobs/$id", null) ?: return null
+        return runCatching {
+            val n = mapper.readTree(resp)
+            JobDetail(
+                id = n.get("id")?.asText() ?: id,
+                status = n.get("status")?.asText() ?: "",
+                progress = n.get("progress")?.asInt() ?: 0,
+                total = n.get("total")?.asInt() ?: 0,
+                error = n.get("error")?.takeIf { !it.isNull }?.asText(),
+                results = n.get("results")?.map {
+                    JobResult(it.get("id").asText(), it.get("fixed")?.asText() ?: "")
+                } ?: emptyList(),
+            )
+        }.getOrNull()
+    }
+
     fun submitBatch(baseUrl: String, model: String?, items: List<Pair<String, String>>): String? {
         val body = mapper.writeValueAsString(
             mapOf("model" to model?.ifBlank { null }, "items" to items.map { mapOf("id" to it.first, "text" to it.second) })
