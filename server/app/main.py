@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import os
 import time
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from watchfiles import awatch
 
@@ -48,6 +50,19 @@ async def log_requests(request: Request, call_next):
 @app.get("/health")
 def health():
     return {"ok": True, "default_model": config.default_model}
+
+
+@app.get("/download/apk")
+def download_apk():
+    """Serve the staged QuickNovel APK for on-phone download over the tailnet."""
+    path = "static/quicknovel.apk"
+    if not os.path.exists(path):
+        raise HTTPException(404, "apk not staged")
+    return FileResponse(
+        path,
+        media_type="application/vnd.android.package-archive",
+        filename="QuickNovel.apk",
+    )
 
 
 @app.get("/models")

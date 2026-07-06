@@ -5,3 +5,4 @@ samples/
 config.yaml
 .venv/
 venv/
+static/
