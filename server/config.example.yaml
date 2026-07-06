@@ -5,7 +5,8 @@
 # Ollama base URL. From inside Docker, reach the host's Ollama via host.docker.internal.
 ollama_base_url: "http://host.docker.internal:11434"
 
-default_model: "qwen2.5-3b"
+# 1.5b fits fully in a 4 GB GPU (100% GPU) -> fast. Bigger models spill to CPU on small GPUs.
+default_model: "qwen2.5-1.5b"
 
 # Rewrite chapters in chunks of this many characters (fits the model context + leaves room to generate).
 chunk_chars: 4000
@@ -21,8 +22,11 @@ presence_penalty: 0.1
 
 # Models offered to the app (GET /models). `litellm` is the LiteLLM model string.
 models:
+  - id: "qwen2.5-1.5b"
+    name: "Qwen2.5 1.5B Instruct (Ollama · fits 4 GB, fast)"
+    litellm: "ollama/qwen2.5:1.5b"
   - id: "qwen2.5-3b"
-    name: "Qwen2.5 3B Instruct (Ollama, GPU)"
+    name: "Qwen2.5 3B Instruct (Ollama · needs >4 GB VRAM)"
     litellm: "ollama/qwen2.5:3b"
   - id: "qwen2.5-7b"
     name: "Qwen2.5 7B Instruct (Ollama, GPU)"
