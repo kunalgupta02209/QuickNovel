@@ -52,7 +52,9 @@ class Config:
 
     @property
     def ollama_base_url(self):
-        return self.get("ollama_base_url")
+        # Env wins so the same config.yaml works locally (localhost) and in Docker
+        # (compose sets OLLAMA_BASE_URL=http://host.docker.internal:11434).
+        return os.environ.get("OLLAMA_BASE_URL") or self.get("ollama_base_url")
 
     @property
     def chunk_chars(self) -> int:

@@ -2,8 +2,9 @@
 # HOT-RELOADED on change (no restart) — edit while the server runs and it picks it up.
 # Copy to config.yaml and edit for your setup.
 
-# Ollama base URL. From inside Docker, reach the host's Ollama via host.docker.internal.
-ollama_base_url: "http://host.docker.internal:11434"
+# Ollama base URL for LOCAL runs. In Docker, compose overrides this with the OLLAMA_BASE_URL env
+# (http://host.docker.internal:11434) so the container reaches the host's Ollama.
+ollama_base_url: "http://localhost:11434"
 
 # 1.5b fits fully in a 4 GB GPU (100% GPU) -> fast. Bigger models spill to CPU on small GPUs.
 default_model: "qwen2.5-1.5b"

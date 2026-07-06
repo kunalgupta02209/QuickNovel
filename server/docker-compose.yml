@@ -15,7 +15,9 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - LITELLM_LOG=WARNING
-      # If you run the optional ollama service below, point at it instead of the host:
+      # Override the config's localhost so the CONTAINER reaches the host's Ollama.
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      # If you run the optional ollama service below, point at it instead:
       # - OLLAMA_BASE_URL=http://ollama:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"  # so the container can reach a host-run Ollama
