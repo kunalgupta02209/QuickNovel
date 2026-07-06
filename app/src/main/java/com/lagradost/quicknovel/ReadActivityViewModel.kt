@@ -1949,7 +1949,9 @@ class ReadActivityViewModel : ViewModel() {
         set(value) { llmModelKey = value }
     var llmSystemPrompt by PreferenceDelegate(LLM_FIX_SYSTEM_PROMPT, "", String::class)
     var llmPromptVersion by PreferenceDelegate(LLM_FIX_PROMPT_VERSION, 1, Int::class)
-    var llmPrevChapters by PreferenceDelegate(LLM_FIX_PREV_CHAPTERS, 2, Int::class)
+    // Default 0: previous-chapter context bloats the prompt and slows generation; the server also
+    // gates it off by default. Raise the slider to re-enable for stronger pronoun consistency.
+    var llmPrevChapters by PreferenceDelegate(LLM_FIX_PREV_CHAPTERS, 0, Int::class)
     // Optional GPU fix server: when the URL is set, rewriting offloads to it (seconds vs minutes).
     var llmServerUrl by PreferenceDelegate(LLM_FIX_SERVER_URL, "", String::class)
     var llmServerModel by PreferenceDelegate(LLM_FIX_SERVER_MODEL, "", String::class)
