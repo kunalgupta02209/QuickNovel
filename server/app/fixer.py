@@ -76,20 +76,30 @@ async def fix_text(
     model_id = model_id or config.default_model
     litellm_model = config.litellm_for(model_id)
     system = system_prompt if system_prompt is not None else prompts.system
-    api_base = config.ollama_base_url if str(litellm_model).startswith("ollama/") else None
-    sampling = config.sampling
+    is_ollama = str(litellm_model).startswith("ollama/")
+    api_base = config.ollama_base_url if is_ollama else None
+    sampling = dict(config.sampling)
+    # Ollama silently drops frequency/presence_penalty, so give it its NATIVE repeat penalty —
+    # without it a small model loops forever on repetitive machine-translated text, which is what
+    # made single chunks run for minutes / time out.
+    if is_ollama:
+        sampling["repeat_penalty"] = 1.3
 
     chunks = split_chunks(text, config.chunk_chars)
     log.info("fix start: model=%s chars=%d chunks=%d", litellm_model, len(text), len(chunks))
     parts: list[str] = []
     for i, chunk in enumerate(chunks):
         messages = _build_messages(system, chunk, previous_chapters if i == 0 else "", character_memory)
+        # A rewrite is ~the input length; hard-cap generation so a looping model can't run away.
+        max_gen = min(1536, len(chunk) // 3 + 256)
         async with _gpu_sem:
             resp = await litellm.acompletion(
                 model=litellm_model,
                 messages=messages,
                 api_base=api_base,
-                num_retries=2,
+                num_retries=1,
+                timeout=240,
+                max_tokens=max_gen,
                 **sampling,
             )
         out = _clean(resp.choices[0].message.content)
