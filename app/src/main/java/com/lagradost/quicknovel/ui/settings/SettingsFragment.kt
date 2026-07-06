@@ -266,6 +266,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return@setOnPreferenceClickListener true
         }
 
+        findPreference<Preference>("llm_server_settings")?.setOnPreferenceClickListener {
+            activity?.let { LlmServerSettingsDialog.show(it) }
+            return@setOnPreferenceClickListener true
+        }
+
         getPref(R.string.download_path_key)?.setOnPreferenceClickListener {
             val dirs = getDownloadDirs(context)
 

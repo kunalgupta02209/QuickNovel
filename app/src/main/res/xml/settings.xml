@@ -128,6 +128,17 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+            android:key="ai_fixer"
+            android:title="@string/llm_server_settings_title"
+            app:isPreferenceVisible="true">
+        <Preference
+                android:icon="@drawable/ic_baseline_cloud_24"
+                android:key="llm_server_settings"
+                android:title="@string/llm_configure_test"
+                android:summary="@string/llm_server_settings_summary" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
             android:key="extra"
             android:title="@string/info"
             app:isPreferenceVisible="true">
