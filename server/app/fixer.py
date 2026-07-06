@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 
@@ -12,6 +13,11 @@ log = logging.getLogger("fixer")
 # Drop provider-unsupported sampling params instead of erroring — e.g. Ollama rejects
 # presence_penalty/frequency_penalty, while OpenAI-style providers accept them.
 litellm.drop_params = True
+
+# Serialize model calls. Concurrent requests each open a context window; on a small GPU the
+# model + multiple KV caches blow the VRAM budget and every request thrashes to a crawl. One
+# call at a time keeps each request fast; extra callers simply queue.
+_gpu_sem = asyncio.Semaphore(1)
 
 
 def split_chunks(text: str, max_chars: int) -> list[str]:
@@ -78,13 +84,14 @@ async def fix_text(
     parts: list[str] = []
     for i, chunk in enumerate(chunks):
         messages = _build_messages(system, chunk, previous_chapters if i == 0 else "", character_memory)
-        resp = await litellm.acompletion(
-            model=litellm_model,
-            messages=messages,
-            api_base=api_base,
-            num_retries=2,
-            **sampling,
-        )
+        async with _gpu_sem:
+            resp = await litellm.acompletion(
+                model=litellm_model,
+                messages=messages,
+                api_base=api_base,
+                num_retries=2,
+                **sampling,
+            )
         out = _clean(resp.choices[0].message.content)
         log.info("  chunk %d/%d in=%d out=%d", i + 1, len(chunks), len(chunk), len(out))
         if out:
