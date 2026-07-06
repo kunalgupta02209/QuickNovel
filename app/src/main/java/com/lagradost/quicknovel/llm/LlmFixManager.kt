@@ -150,13 +150,17 @@ object LlmFixManager {
     private suspend fun runServerBatch(ctx: Context, req: FixRequest, authorNotes: Boolean): Pair<DownloadState, Int> {
         val key = req.key
         val total = req.rangeEnd - req.rangeStart + 1
-        val items = ArrayList<Pair<String, String>>()
+        val items = ArrayList<RemoteFixClient.BatchItem>()
         var alreadyFixed = 0
         for (index in req.rangeStart..req.rangeEnd) {
             if (FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index)) {
                 alreadyFixed++; continue
             }
-            readRawChapter(ctx, req, index, authorNotes)?.let { items.add(index.toString() to it) }
+            val raw = readRawChapter(ctx, req, index, authorNotes) ?: continue
+            // Carry the same context the on-the-spot fix uses, so pronouns/names stay consistent.
+            val prev = buildPrevContext(ctx, req, index, authorNotes)
+            val memory = CharacterGraph.memoryBlock(req.bookIdStr, index)
+            items.add(RemoteFixClient.BatchItem(index.toString(), raw, prev, memory))
         }
         emit(ctx, req, DownloadState.IsDownloading, alreadyFixed, total)
         if (items.isEmpty()) return DownloadState.IsDone to total

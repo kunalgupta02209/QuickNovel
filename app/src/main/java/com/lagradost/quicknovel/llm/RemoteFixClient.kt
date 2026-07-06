@@ -89,9 +89,26 @@ object RemoteFixClient {
         }.getOrNull()
     }
 
-    fun submitBatch(baseUrl: String, model: String?, items: List<Pair<String, String>>): String? {
+    data class BatchItem(
+        val id: String,
+        val text: String,
+        val previousChapters: String = "",
+        val characterMemory: String = "",
+    )
+
+    fun submitBatch(baseUrl: String, model: String?, items: List<BatchItem>): String? {
         val body = mapper.writeValueAsString(
-            mapOf("model" to model?.ifBlank { null }, "items" to items.map { mapOf("id" to it.first, "text" to it.second) })
+            mapOf(
+                "model" to model?.ifBlank { null },
+                "items" to items.map {
+                    mapOf(
+                        "id" to it.id,
+                        "text" to it.text,
+                        "previous_chapters" to it.previousChapters,
+                        "character_memory" to it.characterMemory,
+                    )
+                },
+            )
         )
         val resp = request("POST", "${base(baseUrl)}/fix/batch", body) ?: return null
         return runCatching { mapper.readTree(resp).get("job_id")?.asText() }.getOrNull()

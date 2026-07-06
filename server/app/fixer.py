@@ -57,10 +57,21 @@ def _build_messages(system: str, chunk: str, previous_chapters: str, character_m
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+_PREAMBLE = re.compile(
+    r"^\s*[*#>\-]*\s*(rewritten|revised|corrected|edited|here('?s| is)|the following|sure[,!.])\b.*$",
+    re.IGNORECASE,
+)
+
+
 def _clean(out: str) -> str:
     out = (out or "").strip()
     if out.startswith("```"):
-        out = out.split("\n", 1)[-1].rsplit("```", 1)[0]
+        out = out.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    # Small models sometimes prepend a label line like "**Rewritten Chapter**" or
+    # "Here is the rewritten text:" — drop a short leading preamble line, keep the prose.
+    parts = out.split("\n", 1)
+    if len(parts) == 2 and len(parts[0]) < 70 and _PREAMBLE.match(parts[0]):
+        out = parts[1].strip()
     return out.strip()
 
 

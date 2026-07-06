@@ -32,7 +32,12 @@ class Job:
                     self.status = "cancelled"
                     log.info("job %s cancelled at %d/%d", self.id, self.progress, self.total)
                     return
-                fixed = await fix_text(it["text"], self.model)
+                fixed = await fix_text(
+                    it["text"],
+                    self.model,
+                    previous_chapters=it.get("previous_chapters") or "",
+                    character_memory=it.get("character_memory") or "",
+                )
                 self.results[str(it["id"])] = fixed
                 self.progress += 1
             self.status = "done"

@@ -30,6 +30,8 @@ class SnippetReq(BaseModel):
 class BatchItem(BaseModel):
     id: str
     text: str
+    previous_chapters: str | None = ""
+    character_memory: str | None = ""
 
 
 class BatchReq(BaseModel):
