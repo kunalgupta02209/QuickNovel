@@ -242,6 +242,10 @@
     <string name="llm_server_url_hint">http://192.168.1.10:8000  (blank = on-device)</string>
     <string name="llm_server_jobs">Server jobs</string>
     <string name="llm_refresh">Refresh</string>
+    <string name="llm_fixing_server">Rewriting on the server…</string>
+    <string name="llm_fixing_server_unreachable">⚠ Server unreachable — rewriting on device (slower)</string>
+    <string name="llm_fixed_via_server">Rewritten via server ✓</string>
+    <string name="llm_fixed_via_device">Rewritten on device (server not used)</string>
     <string name="llm_server_unreachable">Server unreachable</string>
     <string name="llm_server_connected">Connected · %1$d models</string>
     <string name="tts_download_model">Download voice model</string>

@@ -2035,17 +2035,33 @@ class ReadActivityViewModel : ViewModel() {
         }
         android.util.Log.i(tag, "rawText len=${rawText.length}; loading engine + generating…")
         val prev = buildPreviousContext(index)
-        onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
-        val cfg = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(
+        val cfg0 = com.lagradost.quicknovel.llm.ChapterFixer.FixConfig(
             llmModel, llmPromptVersion, llmSystemPrompt, llmSupertonic(), llmServerUrl, llmServerModel,
         )
+        // Decide server vs on-device UP FRONT and show it, so a fallback is never silent.
+        val cfg = if (cfg0.serverUrl.isNotBlank()) {
+            if (com.lagradost.quicknovel.llm.RemoteFixClient.reachable(cfg0.serverUrl)) {
+                android.util.Log.i(tag, "server ${cfg0.serverUrl} reachable -> rewriting on server")
+                onState(context.getString(R.string.llm_fixing_server)); cfg0
+            } else {
+                android.util.Log.w(tag, "server ${cfg0.serverUrl} UNREACHABLE -> on-device fallback")
+                onState(context.getString(R.string.llm_fixing_server_unreachable)); cfg0.copy(serverUrl = "")
+            }
+        } else {
+            onState(context.getString(R.string.llm_fixing_running, com.lagradost.quicknovel.llm.LlmModels.byId(llmModel).displayName))
+            cfg0
+        }
         // The on-the-spot button always regenerates: drop any stale cached fix so improvements apply.
         com.lagradost.quicknovel.llm.FixedTextCache.deleteChapter(context, bookId, llmModel, llmPromptVersion, index)
         val streamed = StringBuilder()
-        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(context, bookId, index, rawText, prev, cfg) { chunkIdx, chunkCount, token ->
-            streamed.append(token)
-            onStream("Rewriting  ·  chunk ${chunkIdx + 1} / $chunkCount", streamed.toString())
-        }
+        val fixed = com.lagradost.quicknovel.llm.ChapterFixer.fixChapter(
+            context, bookId, index, rawText, prev, cfg,
+            onProgress = { chunkIdx, chunkCount, token ->
+                streamed.append(token)
+                onStream("Rewriting  ·  chunk ${chunkIdx + 1} / $chunkCount", streamed.toString())
+            },
+            onStatus = { s -> onState(s) },
+        )
         android.util.Log.i(tag, "fix result: ${if (fixed != null) "OK len=${fixed.length}" else "NULL (engine load or blank generation)"}")
         if (fixed != null) {
             llmShowFixedKey = true

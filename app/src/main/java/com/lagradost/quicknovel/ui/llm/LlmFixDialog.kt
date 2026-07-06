@@ -166,11 +166,13 @@ object LlmFixDialog {
                     activity.runOnUiThread {
                         if (fixJob == null) return@runOnUiThread // already cancelled by the user
                         resetFixButton()
-                        Toast.makeText(
-                            activity,
-                            if (ok) R.string.llm_fixed_done else R.string.llm_fix_failed,
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        val msg = when {
+                            !ok -> activity.getString(R.string.llm_fix_failed)
+                            com.lagradost.quicknovel.llm.ChapterFixer.lastFixViaServer ->
+                                activity.getString(R.string.llm_fixed_via_server)
+                            else -> activity.getString(R.string.llm_fixed_via_device)
+                        }
+                        Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
                         if (ok) dialog.dismiss()
                     }
                 },

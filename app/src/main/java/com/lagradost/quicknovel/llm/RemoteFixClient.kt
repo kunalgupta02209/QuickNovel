@@ -75,6 +75,15 @@ object RemoteFixClient {
 
     fun health(baseUrl: String): Boolean = request("GET", "${base(baseUrl)}/health", null) != null
 
+    /** Fast reachability probe (short timeout, no error logging) used to decide server vs on-device. */
+    fun reachable(baseUrl: String, timeoutMs: Int = 2500): Boolean = try {
+        val conn = URL("${base(baseUrl)}/health").openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"; conn.connectTimeout = timeoutMs; conn.readTimeout = timeoutMs
+        (conn.responseCode in 200..299).also { conn.disconnect() }
+    } catch (t: Throwable) {
+        false
+    }
+
     private fun base(url: String): String = url.trim().trimEnd('/')
 
     private fun request(method: String, url: String, body: String?): String? = try {

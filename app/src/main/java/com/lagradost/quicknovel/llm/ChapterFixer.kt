@@ -17,6 +17,9 @@ object ChapterFixer {
     @Volatile private var engineModelId: String? = null
     private val engineMutex = Mutex()
 
+    /** Where the most recent [fixChapter] actually ran — read by the UI to confirm server vs on-device. */
+    @Volatile var lastFixViaServer: Boolean = false
+
     /** Load (or reuse) the engine for [modelId]. Null if the model isn't downloaded or fails to load. */
     suspend fun ensureEngine(context: Context, modelId: String): LlamaCppProseFixer? = engineMutex.withLock {
         val cur = engine
@@ -68,21 +71,26 @@ object ChapterFixer {
         previousChapters: String,
         cfg: FixConfig,
         onProgress: ((chunkIndex: Int, chunkCount: Int, token: String) -> Unit)? = null,
+        onStatus: ((String) -> Unit)? = null,
     ): String? {
         FixedTextCache.load(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex)?.let { return it }
         if (rawText.isBlank()) return null
         // Remote GPU-server path — fast (seconds); falls back to on-device if it fails/unreachable.
         if (cfg.serverUrl.isNotBlank()) {
+            onStatus?.invoke("Rewriting on the server…")
             val memory = CharacterGraph.memoryBlock(bookId, chapterIndex)
             val remote = RemoteFixClient.fixSnippet(cfg.serverUrl, rawText, cfg.serverModel, previousChapters, memory)
             if (!remote.isNullOrBlank()) {
+                lastFixViaServer = true
                 val cleaned = dedupeRepetition(remote)
                 onProgress?.invoke(0, 1, cleaned)
                 FixedTextCache.save(context, bookId, cfg.modelId, cfg.promptVersion, chapterIndex, cleaned)
                 return cleaned
             }
             android.util.Log.w("LlmFixFlow", "remote fix failed; falling back to on-device")
+            onStatus?.invoke("⚠ Server error — rewriting on device (slower)")
         }
+        lastFixViaServer = false
         val e = ensureEngine(context, cfg.modelId) ?: return null
         return try {
             val memory = CharacterGraph.memoryBlock(bookId, chapterIndex) // cross-chapter consistency
