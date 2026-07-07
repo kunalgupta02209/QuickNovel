@@ -187,11 +187,24 @@ class OnDeviceTtsEngine(
             queue.clear(); byLine.clear(); playPos = 0
             lock.notifyAll()
         }
-        producer?.interrupt(); consumer?.interrupt()
+        val p = producer; val c = consumer
         producer = null; consumer = null
+        p?.interrupt(); c?.interrupt()
+        // The native OfflineTts.generate ignores thread interrupts, so we must WAIT for the producer
+        // to leave render() before freeing the native object. Its sink returns 0 once running=false,
+        // so the in-flight generate aborts within a chunk. Freeing tts mid-generate locks a destroyed
+        // mutex -> SIGABRT (crash in the tts-synth thread).
+        runCatching { p?.join(2000) }
+        runCatching { c?.join(500) }
         track?.let { t -> runCatching { t.pause() }; runCatching { t.flush() }; runCatching { t.stop() }; runCatching { t.release() } }
         track = null
-        tts?.let { runCatching { it.release() } }
+        if (p?.isAlive == true) {
+            // Still synthesizing after the grace period — leak the native object rather than free it
+            // out from under the generate (a small one-off leak beats a hard crash).
+            Log.w(TAG, "producer still synthesizing after join; leaking OfflineTts to avoid use-after-free")
+        } else {
+            tts?.let { runCatching { it.release() } }
+        }
         tts = null
     }
 
