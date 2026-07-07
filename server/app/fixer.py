@@ -89,6 +89,18 @@ _PREAMBLE = re.compile(
 )
 
 
+_TRAILER = re.compile(
+    r"(please (provide|let|share|give|note)|let me know|feel free|i'?m (ready|happy|here)|i hope (this|that)|"
+    r"additional (info|context|information|details)|would you like|if you (have|need|want|'?d)|"
+    r"any (other |additional )?(details|info|questions)|happy to (help|assist)|"
+    r"(here|this) (is |'?s )?(the |a )?(rewrite|rewritten|revised|translation)|machine translation|"
+    r"it'?s important to|keep in mind|as an ai|i'?ve (rewritten|fixed|corrected|revised|made)|"
+    r"grammatical error|text-to-speech|readability|^note:|^\*\*note|"
+    r"[\U0001F300-\U0001FAFF☀-➿])",
+    re.IGNORECASE,
+)
+
+
 def _clean(out: str) -> str:
     out = (out or "").strip()
     if out.startswith("```"):
@@ -98,6 +110,12 @@ def _clean(out: str) -> str:
     parts = out.split("\n", 1)
     if len(parts) == 2 and len(parts[0]) < 70 and _PREAMBLE.match(parts[0]):
         out = parts[1].strip()
+    # ...and sometimes append a chat trailer ("Please provide me with... 😊"). Drop trailing
+    # blocks that read as conversational meta (short + matching the trailer patterns / an emoji).
+    blocks = re.split(r"\n{2,}", out)
+    while len(blocks) > 1 and len(blocks[-1]) < 500 and _TRAILER.search(blocks[-1]):
+        blocks.pop()
+    out = "\n\n".join(blocks)
     return out.strip()
 
 
@@ -122,6 +140,11 @@ async def fix_text(
     if is_ollama:
         sampling["repeat_penalty"] = 1.3
         sampling["num_ctx"] = config.num_ctx  # smaller context -> smaller KV cache -> more fits on GPU
+    # Stop before common chat trailers so the model never wastes time generating meta-commentary.
+    sampling["stop"] = [
+        "\n\n**Please", "\n\nPlease note", "\n\n**Note", "\n\nNote:", "\n\nThis rewrite",
+        "\n\nI hope this", "\n\n(Note", "\n\n---",
+    ]
 
     # Previous-chapter context bloats the prompt (slower eval); gate it behind a config flag.
     prev = previous_chapters if config.send_previous_chapters else ""
@@ -134,8 +157,9 @@ async def fix_text(
     parts: list[str] = []
     for i, chunk in enumerate(chunks):
         messages = _build_messages(system, chunk, prev if i == 0 else "", character_memory)
-        # A rewrite is ~the input length; hard-cap generation so a looping model can't run away.
-        max_gen = min(1536, len(chunk) // 3 + 256)
+        # A rewrite is ~the input length; hard-cap generation (tight floor) so short inputs don't
+        # over-generate a chat trailer and a looping model can't run away.
+        max_gen = min(1536, len(chunk) // 3 + 96)
         async with _gpu_sem:
             resp = await litellm.acompletion(
                 model=litellm_model,
