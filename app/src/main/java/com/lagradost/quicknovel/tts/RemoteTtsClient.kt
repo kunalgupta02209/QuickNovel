@@ -17,7 +17,7 @@ object RemoteTtsClient {
 
     data class ServerVoice(val id: String = "", val speakers: Int = 1, val ready: Boolean = false)
     data class Sentence(val key: String, val text: String)
-    data class ChapterReq(val index: Int, val sentences: List<Sentence>)
+    data class ChapterReq(val index: Int, val sentences: List<Sentence>, val name: String = "")
     data class JobDetail(
         val id: String = "",
         val status: String = "",
@@ -50,17 +50,19 @@ object RemoteTtsClient {
 
     fun submitBatch(
         baseUrl: String, bookId: String, modelId: String, sid: Int, sampleRate: Int,
-        chapters: List<ChapterReq>,
+        chapters: List<ChapterReq>, bookName: String = "",
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "book_id" to bookId,
+                "book_name" to bookName,
                 "model_id" to modelId,
                 "sid" to sid,
                 "sample_rate" to sampleRate,
                 "items" to chapters.map { ch ->
                     mapOf(
                         "index" to ch.index,
+                        "name" to ch.name,
                         "sentences" to ch.sentences.map { mapOf("key" to it.key, "text" to it.text) },
                     )
                 },

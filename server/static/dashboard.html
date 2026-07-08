@@ -76,12 +76,15 @@ function jobRow(j, kindPath) {
     ? `<button onclick="cancelJob('${kindPath}','${esc(j.id)}')">stop</button>` : '';
   const rate = j.rate != null ? `${j.rate}/s` : '';
   const eta = j.eta_s != null ? ` · eta ${fmtDur(j.eta_s)}` : '';
-  const extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
-  const label = j.book_id ? `${esc(j.book_id)} · ${esc(j.model_id)}/s${j.sid}` : esc(j.model || '');
+  let extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
+  if (j.current) extra += ` · now: ch ${j.current.index + 1}${j.current.name ? ' — ' + esc(j.current.name) : ''}`;
+  const label = j.book_id
+    ? `${esc(j.book_name || j.book_id)} · ${esc(j.model_id)}/s${j.sid}`
+    : esc(j.model || '');
   let chips = '';
   if (j.chapters && j.chapters.length && j.status === 'running') {
     chips = '<div class="chips">' + j.chapters.map(c =>
-      `<span class="chip ${c.ready ? 'full' : c.done > 0 ? 'part' : ''}" title="c${c.index} ${c.done}/${c.total}"></span>`).join('') + '</div>';
+      `<span class="chip ${c.ready ? 'full' : c.done > 0 ? 'part' : ''}" title="ch ${c.index + 1}${c.name ? ' — ' + esc(c.name) : ''} (${c.done}/${c.total})"></span>`).join('') + '</div>';
   }
   return `<tr class="${esc(j.status)}"><td><span class="pill ${esc(j.status)}">${esc(j.status)}</span></td>
     <td>${label}<div style="color:var(--dim);font-size:11px">${esc(j.id)}${extra}</div>${chips}</td>

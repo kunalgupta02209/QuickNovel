@@ -69,6 +69,66 @@ object RemoteTtsManager {
     private fun shouldStop(key: String): Boolean = synchronized(lock) { stopRequested.contains(key) }
 
     /**
+     * G1: fire-on-download-complete. Reads the autogen prefs statically (no ViewModel), applies the
+     * same gates as maybeStartAutoPregen, and hands off to [onBookReady]. Call from BookDownloader2
+     * when a book's chapter download finishes.
+     */
+    fun maybeAutoQueueFromDownload(
+        context: Context,
+        apiName: String,
+        author: String?,
+        name: String,
+        posterUrl: String?,
+    ) {
+        val ctx = context.applicationContext
+        runCatching {
+            val autogen = com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_OD_AUTOGEN, Boolean::class.javaObjectType
+            ) == true
+            val serverAutogen = com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_SERVER_AUTOGEN, Boolean::class.javaObjectType
+            ) == true
+            if (!autogen && !serverAutogen) return
+            val engine = com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_ENGINE, Int::class.javaObjectType
+            ) ?: 0
+            if (engine != 1) { // ON_DEVICE only (system TTS can't play the cached WAVs)
+                android.util.Log.i(TAG, "download-complete autogen skipped: engine != ON_DEVICE"); return
+            }
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+            val modelId = com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_OD_MODEL, String::class.java
+            ) ?: "kitten"
+            val def = TtsModels.byId(modelId)
+            if (!TtsModels.isReady(ctx, def)) {
+                android.util.Log.i(TAG, "download-complete autogen skipped: model ${def.id} not downloaded"); return
+            }
+            val voice = com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_OD_VOICE, String::class.java
+            )
+            val sid = TtsModels.parseVoice(voice)?.second ?: 0
+            val total = com.lagradost.quicknovel.BookDownloader2Helper
+                .downloadInfo(ctx, author ?: "", name, apiName)?.total?.toInt() ?: return
+            if (total <= 0) return
+            val serverUrl = if (serverAutogen) {
+                com.lagradost.quicknovel.BaseApplication.Companion.getKeyClass(
+                    com.lagradost.quicknovel.LLM_FIX_SERVER_URL, String::class.java
+                ) ?: ""
+            } else ""
+            android.util.Log.i(TAG, "download-complete -> autogen trigger '$name' total=$total")
+            onBookReady(
+                ctx,
+                RemoteTtsRequest(
+                    bookId = com.lagradost.quicknovel.BookDownloader2Helper.generateId(apiName, author ?: "", name),
+                    apiName = apiName, author = author ?: "", name = name, posterUrl = posterUrl,
+                    modelId = def.id, sid = sid, sampleRate = def.sampleRate,
+                    rangeStart = 0, rangeEnd = total - 1, serverUrl = serverUrl,
+                ),
+            )
+        }.onFailure { logError(it) }
+    }
+
+    /**
      * The single entry point used by both triggers (book download-complete + book open). Picks the
      * server when a URL is set + reachable, else falls back to on-device pre-gen. No-op if already
      * running (either producer) or fully cached.
@@ -132,7 +192,10 @@ object RemoteTtsManager {
                 val sentences = lines
                     .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
                     .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
-                if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences))
+                // The prepended title line (startChar==endChar==0) doubles as the chapter's display name.
+                val chapterName = lines.firstOrNull()
+                    ?.takeIf { it.startChar == 0 && it.endChar == 0 }?.speakOutMsg ?: "Chapter ${index + 1}"
+                if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences, chapterName))
             }
             if (chapters.isEmpty()) {
                 lastStatus = "done"
@@ -146,8 +209,9 @@ object RemoteTtsManager {
                 RemoteTtsClient.getJob(req.serverUrl, it)?.status in setOf("running", "queued")
             }
             if (jobId == null) {
-                jobId = RemoteTtsClient.submitBatch(req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters)
-                    ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
+                jobId = RemoteTtsClient.submitBatch(
+                    req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters, bookName = req.name,
+                ) ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
             }
             runCatching { setKey(TTS_REMOTE_FOLDER, key, jobId) }
             android.util.Log.i(TAG, "server job $jobId for key=$key (${chapters.size} chapters to sync)")
@@ -155,12 +219,28 @@ object RemoteTtsManager {
 
             // 3) Poll + pull each ready chapter's audio into the cache.
             val fetched = HashSet<Int>()
+            var pollFailures = 0
             while (true) {
                 if (shouldStop(key)) {
                     lastStatus = "stopped"
                     RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
                 }
-                val job = RemoteTtsClient.getJob(req.serverUrl, jobId) ?: return
+                val job = RemoteTtsClient.getJob(req.serverUrl, jobId)
+                if (job == null) {
+                    // Distinguish a network blip (retry, keep the persisted jobId so we resume)
+                    // from the job being GONE on a reachable server (e.g. --reload wiped it):
+                    // then drop the stale id so the next trigger resubmits the uncached remainder.
+                    pollFailures++
+                    if (pollFailures < 5) { delay(5000); continue }
+                    if (RemoteTtsClient.reachable(req.serverUrl)) {
+                        android.util.Log.w(TAG, "job $jobId gone on reachable server; clearing for resubmit (key=$key)")
+                        runCatching { removeKey(TTS_REMOTE_FOLDER, key) }
+                    } else {
+                        android.util.Log.w(TAG, "server unreachable after $pollFailures polls; keeping jobId for resume (key=$key)")
+                    }
+                    return
+                }
+                pollFailures = 0
                 for (idx in job.readyChapters) {
                     if (idx in fetched) continue
                     if (fetchChapter(ctx, req, def, idx)) {

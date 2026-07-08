@@ -2040,6 +2040,7 @@ class ReadActivityViewModel : ViewModel() {
         // G2 diagnostics: every silent early-return logs its reason (the queue-verification test
         // reads these to explain "nothing happened").
         val tag = "RemoteTts"
+        if (!::book.isInitialized) { android.util.Log.i(tag, "autopregen skipped: no book yet"); return }
         if (!ttsAutogen && !ttsServerAutogen) { android.util.Log.i(tag, "autopregen skipped: both autogen prefs off"); return }
         if (ttsEngineType != TtsEngineType.ON_DEVICE) { android.util.Log.i(tag, "autopregen skipped: engine != ON_DEVICE"); return }
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
@@ -2073,7 +2074,7 @@ class ReadActivityViewModel : ViewModel() {
                     bookId = BookDownloader2Helper.generateId(meta.apiName, author, meta.name),
                     apiName = meta.apiName, author = author, name = meta.name,
                     posterUrl = (book as? QuickBook)?.data?.poster,
-                    modelId = def.id, sid = sid, sampleRate = 24000,
+                    modelId = def.id, sid = sid, sampleRate = def.sampleRate,
                     rangeStart = 0, rangeEnd = total - 1,
                     serverUrl = if (ttsServerAutogen) llmServerUrl else "",
                 ),
@@ -2275,6 +2276,10 @@ class ReadActivityViewModel : ViewModel() {
         com.lagradost.quicknovel.tts.TtsPrefetchManager.cancelAll()
         com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
         refreshTtsCacheScope() // re-scope the "generating" underline to the new voice/model (or null)
+        // Switching model/voice re-triggers autogen for the NEW voice (its own cache key -> a new
+        // server/local job). The previous voice's job and cached audio are left untouched — switching
+        // back is instant, and any in-flight old-voice job can be stopped from the dashboard.
+        maybeStartAutoPregen(ctx)
         val wasRunning = isTTSRunning()
         // Capture the currently-spoken line BEFORE stopTTS (whose finally posts _ttsLine=null) so the
         // driver resumes at the SAME sentence in the new voice — auditioning voices on the fly.

@@ -42,20 +42,26 @@ def sem_stats() -> dict:
 
 
 class TtsJob:
-    def __init__(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict], num_threads: int):
+    def __init__(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
+                 num_threads: int, book_name: str = ""):
         self.id = uuid.uuid4().hex[:12]
         self.book_id = book_id
+        self.book_name = book_name  # human-readable (dashboard); book_id stays the storage key
         self.model_id = model_id
         self.sid = sid
         self.sample_rate = sample_rate
         self.num_threads = num_threads
-        self.items = items  # [{index, sentences:[{key, text}]}]
+        self.items = items  # [{index, name?, sentences:[{key, text}]}]
         self.status = "queued"  # queued | running | done | cancelled | error
         self.total = sum(len(it.get("sentences") or []) for it in items)
         self.progress = 0
         self.synthesized = 0  # actually generated (excludes cache-skips) -> honest rate
+        self.current: dict | None = None  # {"index", "name"} of the chapter being generated
         self.chapters: dict[int, dict] = {
-            int(it["index"]): {"total": len(it.get("sentences") or []), "done": 0} for it in items
+            int(it["index"]): {
+                "total": len(it.get("sentences") or []), "done": 0,
+                "name": (it.get("name") or ""),
+            } for it in items
         }
         self.created = time.time()
         self.started: float | None = None
@@ -76,6 +82,7 @@ class TtsJob:
                     self.status = "cancelled"
                     return
                 index = int(it["index"])
+                self.current = {"index": index, "name": it.get("name") or ""}
                 for sent in (it.get("sentences") or []):
                     if self._cancel:
                         self.status = "cancelled"
@@ -97,6 +104,7 @@ class TtsJob:
                     self.progress += 1
                     self.chapters[index]["done"] += 1
             self.status = "done"
+            self.current = None
             log.info("tts job %s done", self.id)
         except asyncio.CancelledError:
             self.status = "cancelled"
@@ -122,9 +130,10 @@ class TtsJob:
 
     def summary(self) -> dict:
         return {
-            "id": self.id, "book_id": self.book_id, "model_id": self.model_id, "sid": self.sid,
+            "id": self.id, "book_id": self.book_id, "book_name": self.book_name,
+            "model_id": self.model_id, "sid": self.sid,
             "status": self.status, "progress": self.progress, "total": self.total,
-            "synthesized": self.synthesized, "created": self.created,
+            "synthesized": self.synthesized, "current": self.current, "created": self.created,
             "started": self.started, "finished": self.finished, "error": self.error,
         }
 
@@ -132,7 +141,8 @@ class TtsJob:
         d = self.summary()
         d["ready_chapters"] = [i for i, c in self.chapters.items() if c["total"] > 0 and c["done"] >= c["total"]]
         d["chapters"] = [
-            {"index": i, "done": c["done"], "total": c["total"], "ready": c["done"] >= c["total"]}
+            {"index": i, "done": c["done"], "total": c["total"], "ready": c["done"] >= c["total"],
+             "name": c.get("name") or ""}
             for i, c in sorted(self.chapters.items())
         ]
         return d
@@ -142,8 +152,9 @@ class TtsJobManager:
     def __init__(self) -> None:
         self.jobs: dict[str, TtsJob] = {}
 
-    def submit(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict], num_threads: int) -> TtsJob:
-        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads)
+    def submit(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
+               num_threads: int, book_name: str = "") -> TtsJob:
+        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads, book_name)
         self.jobs[job.id] = job
         job._task = asyncio.create_task(job.run())
         return job

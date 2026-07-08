@@ -146,11 +146,13 @@ class TtsSentence(BaseModel):
 
 class TtsChapter(BaseModel):
     index: int
+    name: str = ""  # human-readable chapter title (dashboard)
     sentences: list[TtsSentence]
 
 
 class TtsBatchReq(BaseModel):
     book_id: str
+    book_name: str = ""  # human-readable book title (dashboard)
     model_id: str
     sid: int = 0
     sample_rate: int = 24000
@@ -186,7 +188,7 @@ async def tts_batch(req: TtsBatchReq):
         raise HTTPException(400, "no items")
     job = tts_jobs.submit(
         req.book_id, req.model_id, req.sid, req.sample_rate,
-        [i.model_dump() for i in req.items], config.tts_num_threads,
+        [i.model_dump() for i in req.items], config.tts_num_threads, req.book_name,
     )
     return {"job_id": job.id}
 

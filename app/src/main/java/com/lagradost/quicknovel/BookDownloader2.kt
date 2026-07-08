@@ -447,7 +447,11 @@ object BookDownloader2Helper {
             */
 
             setKey(DOWNLOAD_SIZE, id.toString(), count)
-            val total = getKey<Int>(DOWNLOAD_TOTAL, id.toString()) ?: return null
+            // A lost/never-written downloads_total key used to null the whole result even with
+            // chapters on disk — silently hiding the book from the library AND from TTS autogen.
+            // Fall back to the on-disk count (not persisted: the real total may be larger and a
+            // future refresh/download can still write the correct value).
+            val total = getKey<Int>(DOWNLOAD_TOTAL, id.toString()) ?: count
             return DownloadProgress(count.toLong(), total.toLong(), downloaded.toLong())
         } catch (e: Exception) {
             logError(e)
@@ -2559,6 +2563,14 @@ object BookDownloader2 {
                         load,
                         progressState
                     )
+            }
+
+            // G1: a finished download is the natural moment to sync chapters for TTS generation
+            // (server-offloaded when configured, else on-device) — not just on book open.
+            if (downloadedTotal > 0) {
+                com.lagradost.quicknovel.tts.RemoteTtsManager.maybeAutoQueueFromDownload(
+                    context, api.name, load.author, load.name, load.posterUrl,
+                )
             }
         } catch (t: Throwable) {
             // also set it here in case of exception

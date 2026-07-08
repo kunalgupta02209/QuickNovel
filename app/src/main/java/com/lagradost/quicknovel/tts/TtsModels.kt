@@ -52,6 +52,8 @@ object TtsModels {
         val supported: Boolean = true,
         /** ISO-639-1 language the model speaks; "" = multilingual / skip the language guard. */
         val lang: String = "en",
+        /** Native output sample rate (all current models are 24 kHz; kept per-model, not hardcoded). */
+        val sampleRate: Int = 24000,
     )
 
     val ALL: List<ModelDef> = listOf(
