@@ -3,8 +3,11 @@ package com.lagradost.quicknovel.util
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
+import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.core.view.marginLeft
 import androidx.core.view.marginRight
@@ -133,6 +136,47 @@ object SingleSelectionHelper {
             { if (it.isNotEmpty()) callback.invoke(it.first()) },
             dismissCallback
         )
+    }
+
+    /**
+     * Single-choice dialog with a title + subtitle per row (used for the named TTS voice picker).
+     * Single-tap commits (no Apply). [items] = title to subtitle; a blank subtitle collapses to one
+     * line. The clicked position IS the returned index (== sid), so callers map exactly as before.
+     */
+    fun Context.showTwoLineDialog(
+        items: List<Pair<String, String>>,
+        selectedIndex: Int,
+        name: String,
+        dismissCallback: () -> Unit = {},
+        callback: (Int) -> Unit,
+    ) {
+        val dialog = AlertDialog.Builder(this, R.style.AlertDialogCustom)
+            .setView(R.layout.bottom_selection_dialog).create()
+        dialog.show()
+
+        val listView = dialog.findViewById<ListView>(R.id.listview1)!!
+        dialog.findViewById<TextView>(R.id.text1)!!.text = name
+        dialog.findViewById<LinearLayout>(R.id.apply_btt_holder)!!.isVisible = false
+
+        val adapter = object : ArrayAdapter<Pair<String, String>>(
+            this, R.layout.sort_bottom_two_line_choice, R.id.voice_title, items
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                v.findViewById<TextView>(R.id.voice_title).text = items[position].first
+                v.findViewById<TextView>(R.id.voice_subtitle).apply {
+                    text = items[position].second
+                    isGone = items[position].second.isBlank()
+                }
+                return v
+            }
+        }
+        listView.adapter = adapter
+        listView.choiceMode = AbsListView.CHOICE_MODE_SINGLE
+        listView.setItemChecked(selectedIndex, true)
+        listView.setSelection(selectedIndex)
+        dialog.setOnDismissListener { dismissCallback() }
+        listView.setOnItemClickListener { _, _, which, _ -> callback(which); dialog.dismiss() }
     }
 
     /** Only for a low amount of items */

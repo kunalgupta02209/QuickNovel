@@ -75,6 +75,7 @@ import com.lagradost.quicknovel.tts.TtsModels
 import com.lagradost.quicknovel.ui.TtsEngineType
 import com.lagradost.quicknovel.util.Coroutines.ioSafe
 import com.lagradost.quicknovel.util.SingleSelectionHelper.showDialog
+import com.lagradost.quicknovel.util.SingleSelectionHelper.showTwoLineDialog
 import kotlinx.coroutines.flow.first
 import com.lagradost.quicknovel.util.UIHelper.colorFromAttribute
 import com.lagradost.quicknovel.util.UIHelper.fixPaddingStatusbar
@@ -507,11 +508,16 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             val def = TtsModels.byId(viewModel.ttsOnDeviceModel)
             val count = def.speakerCount.coerceAtLeast(1)
             if (count <= 1) { showToast("${def.displayName} — single voice"); return@setOnClickListener }
-            val names = (0 until count).map { "${getString(R.string.tts_voice)} ${it + 1}" }
+            val labels = TtsModels.voiceLabels(def, getString(R.string.tts_voice))
             val current = (TtsModels.parseVoice(viewModel.ttsOnDeviceVoice)?.second ?: 0).coerceIn(0, count - 1)
-            ctx.showDialog(names, current, getString(R.string.tts_voice), false, {}) { idx ->
-                viewModel.ttsOnDeviceVoice = TtsModels.voiceName(def, idx)
+            ctx.showTwoLineDialog(labels.map { it.name to it.desc }, current, getString(R.string.tts_voice)) { idx ->
+                viewModel.ttsOnDeviceVoice = TtsModels.voiceName(def, idx) // idx == sid, mapping unchanged
+                b.ttsVoiceButton.text = labels[idx].name
             }
+        }
+        // Show the current voice's name on the button instead of the static word "Voice".
+        TtsModels.parseVoice(viewModel.ttsOnDeviceVoice)?.let { (d, sid) ->
+            b.ttsVoiceButton.text = TtsModels.voiceLabel(d, sid, getString(R.string.tts_voice)).name
         }
 
         b.ttsBufferSlider.value = viewModel.ttsLookahead.coerceIn(1, 6).toFloat()

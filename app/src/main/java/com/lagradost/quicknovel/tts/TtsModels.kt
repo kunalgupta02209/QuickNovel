@@ -132,6 +132,46 @@ object TtsModels {
         return def to sid
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Friendly per-speaker labels (display only — the stored id stays "<modelId>:<sid>")
+    // ---------------------------------------------------------------------------------------------
+
+    /** Friendly display label for one neural voice. Empty [desc] => single-line fallback row. */
+    data class VoiceLabel(val name: String, val desc: String)
+
+    /**
+     * Curated per-speaker labels keyed by [ModelDef.id]; list index == sid. Kitten's 8 voices are
+     * the official KittenML names in embedding order (m,f alternating); gender is from the voice-id
+     * suffix, the tone adjectives are the documented KittenML split. Uncurated models fall back to
+     * "Voice N". English-only, alongside the existing English [ModelDef.displayName]/[ModelDef.note].
+     */
+    private val CURATED_VOICES: Map<String, List<VoiceLabel>> = mapOf(
+        "kitten" to listOf(
+            VoiceLabel("Jasper", "Male · deep, steady — authoritative narration"),
+            VoiceLabel("Bella", "Female · warm, soft — cozy, gentle reading"),
+            VoiceLabel("Bruno", "Male · full, grounded — firm, confident narration"),
+            VoiceLabel("Luna", "Female · warm, mellow — calm, soothing reads"),
+            VoiceLabel("Hugo", "Male · bright, articulate — clear, upbeat narration"),
+            VoiceLabel("Rosie", "Female · bright, lively — expressive, upbeat reading"),
+            VoiceLabel("Leo", "Male · balanced, natural — all-round default narrator"),
+            VoiceLabel("Kiki", "Female · light, warm — friendly, intimate reading"),
+        ),
+        // kokoro (11) / supertonic / zipvoice intentionally omitted -> "Voice N" fallback
+    )
+
+    /** Labels for every speaker of [def]; length always == speakerCount. Falls back to
+     *  "<fallbackPrefix> N" for uncurated ids or when speakerCount exceeds the curated list. */
+    fun voiceLabels(def: ModelDef, fallbackPrefix: String): List<VoiceLabel> {
+        val curated = CURATED_VOICES[def.id].orEmpty()
+        return (0 until def.speakerCount.coerceAtLeast(1)).map { sid ->
+            curated.getOrNull(sid) ?: VoiceLabel("$fallbackPrefix ${sid + 1}", "")
+        }
+    }
+
+    /** Single-sid label (for read-only summaries like the pre-gen dialog). */
+    fun voiceLabel(def: ModelDef, sid: Int, fallbackPrefix: String): VoiceLabel =
+        CURATED_VOICES[def.id]?.getOrNull(sid) ?: VoiceLabel("$fallbackPrefix ${sid + 1}", "")
+
     /** ONNX inference threads. More threads = faster synthesis on multi-core phones. */
     private val inferenceThreads: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
 

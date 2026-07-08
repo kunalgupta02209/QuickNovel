@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two-line single-choice row: leading check (activation-tinted) + title/subtitle stack.
+     Mirrors CheckLabel's check drawable/tint; used by SingleSelectionHelper.showTwoLineDialog. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="?android:attr/listPreferredItemHeightSmall"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:foreground="?attr/selectableItemBackgroundBorderless"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp">
+
+    <ImageView
+        android:id="@+id/voice_check"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="20dp"
+        android:duplicateParentState="true"
+        android:src="@drawable/ic_baseline_check_24_listview"
+        app:tint="@color/check_selection_color"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/voice_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/text_selection_color"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            tools:text="Jasper" />
+
+        <TextView
+            android:id="@+id/voice_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="?attr/grayTextColor"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            tools:text="Male · deep, steady — authoritative narration" />
+    </LinearLayout>
+</LinearLayout>

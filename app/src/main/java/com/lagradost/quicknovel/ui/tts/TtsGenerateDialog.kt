@@ -54,7 +54,8 @@ object TtsGenerateDialog {
         val def = TtsModels.byId(getKey<String>(EPUB_TTS_OD_MODEL) ?: "kitten")
         val sid = TtsModels.parseVoice(getKey<String>(EPUB_TTS_OD_VOICE))?.second ?: 0
         val ready = TtsModels.isReady(context, def)
-        binding.ttsGenVoiceLabel.text = "${def.displayName}  ·  voice ${sid + 1}"
+        binding.ttsGenVoiceLabel.text =
+            "${def.displayName}  ·  ${TtsModels.voiceLabel(def, sid, context.getString(R.string.tts_voice)).name}"
         binding.ttsGenHint.visibility = if (ready) View.GONE else View.VISIBLE
         binding.ttsGenStart.isEnabled = ready && books.isNotEmpty()
 
