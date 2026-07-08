@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 import re
 import time
 
@@ -170,25 +171,20 @@ def _mark_paragraphs(paragraphs: list[str]) -> str:
     return "\n\n".join(f"[[P{i}]]\n{p}" for i, p in enumerate(paragraphs))
 
 
-def _parse_performance(paragraphs: list[str], llm_out: str) -> list[dict]:
-    """Marker-anchored parse of cue-annotated LLM output -> span JSON. Any paragraph the model
-    mangled/dropped falls back to the raw original (src=raw) — alignment never fails a job."""
+def _parse_perf_tags(llm_out: str) -> dict[int, dict]:
+    """Marker-anchored parse of inline-tag LLM output (LOCAL models) -> {i: paragraph}."""
     parts: dict[int, str] = {}
     matches = list(_MARKER.finditer(llm_out))
     for j, m in enumerate(matches):
         end = matches[j + 1].start() if j + 1 < len(matches) else len(llm_out)
         parts[int(m.group(1))] = llm_out[m.end():end].strip()
 
-    out = []
-    for i, src_text in enumerate(paragraphs):
-        t = parts.get(i, "")
+    out: dict[int, dict] = {}
+    for i, t in parts.items():
         if not t:
-            out.append({"i": i, "src": "raw", "spans": [
-                {"text": src_text, "speaker": "narrator", "delivery": "neutral", "events": []}]})
             continue
         delivery = "neutral"
         events: list[dict] = []
-        # leading tags set paragraph delivery; all tags anywhere are captured (events) or stripped
         lead = _TAG.match(t)
         while lead:
             tag = lead.group(1)
@@ -206,8 +202,46 @@ def _parse_performance(paragraphs: list[str], llm_out: str) -> list[dict]:
             return ""
 
         t = _TAG.sub(_capture, t).strip()
-        out.append({"i": i, "src": "llm", "spans": [
-            {"text": t or src_text, "speaker": "narrator", "delivery": delivery, "events": events}]})
+        if t:
+            out[i] = {"i": i, "src": "llm", "spans": [
+                {"text": t, "speaker": "narrator", "delivery": delivery, "events": events}]}
+    return out
+
+
+def _parse_perf_json(llm_out: str, allowed_speakers: set[str]) -> dict[int, dict]:
+    """Parse span-JSON output (CLOUD models, P4) -> {i: paragraph}, validating against the closed
+    vocabularies + the CAST ids (invalid speaker -> narrator, invalid event -> dropped)."""
+    try:
+        data = json.loads(llm_out[llm_out.find("{"): llm_out.rfind("}") + 1])
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[int, dict] = {}
+    for p in (data.get("paragraphs") or []):
+        try:
+            i = int(p.get("i"))
+        except (TypeError, ValueError):
+            continue
+        spans = []
+        for s in (p.get("spans") or []):
+            text = (s.get("text") or "").strip()
+            if not text:
+                continue
+            speaker = s.get("speaker") or "narrator"
+            if speaker != "narrator":
+                sid = speaker.removeprefix("char:")
+                if f"char:{sid}" not in allowed_speakers:
+                    speaker = "narrator"
+            spans.append({
+                "text": text,
+                "speaker": speaker,
+                "delivery": s.get("delivery") if s.get("delivery") in DELIVERY_TAGS else "neutral",
+                "events": [e for e in (s.get("events") or [])
+                           if isinstance(e, dict) and e.get("tag") in EVENT_TAGS][:3],
+                "pauseBeforeMs": max(0, min(int(s.get("pauseBeforeMs") or 0), 1500)),
+            })
+        if spans:
+            mood = p.get("mood") if p.get("mood") in ("calm", "tense", "joyful", "somber", "action") else None
+            out[i] = {"i": i, "src": "llm", "mood": mood, "spans": spans}
     return out
 
 
@@ -295,25 +329,38 @@ async def fix_text(
     chunks = split_chunks(text, config.chunk_chars)
     log.info("fix start: task=%s model=%s chars=%d chunks=%d prev=%s",
              task, active["litellm_model"], len(text), len(chunks), bool(prev))
+    # P4: speakers the cloud model may assign, derived from the CAST block already flowing in as
+    # character_memory (the charmap backfill) — no extra fetch, spoiler gating inherited.
+    allowed_speakers = {f"char:{m}" for m in re.findall(r"char:([0-9a-fA-F]{6,})", character_memory or "")}
+
     parts: list[str] = []
+    perf_matched: dict[int, dict] = {}
     fallbacks = 0
     for i, chunk in enumerate(chunks):
         if pause_event is not None and not pause_event.is_set():
             await pause_event.wait()  # job paused: suspend between chunks
-        messages = _build_messages(system, chunk, prev if i == 0 else "", character_memory)
         # Local models get a tight cap (runaway/looping protection). Cloud models burn HIDDEN
         # reasoning tokens inside max_tokens (measured: minimax/deepseek return EMPTY content with
         # finish=length on tight caps), so they get a roomy budget — reasoning is fast and the
         # visible output is still bounded by the prompt contract.
         tight = min(2048, len(chunk) // 2 + 192) if is_performance else min(1536, len(chunk) // 3 + 96)
-        roomy = min(4096, len(chunk) + 1536)
+        # Span-JSON output is verbose (keys + structure) on top of hidden reasoning: performance
+        # chunks get the full budget (measured: 1863 starved minimax even on a 330-char chunk).
+        roomy = 4096 if is_performance else min(4096, len(chunk) + 1536)
         out = None
+        out_cloud_json = False
         for attempt_params in ([active] if not (active["is_cloud"] and fallback_id) else
                                [active, _call_params(fallback_id, task)]):
+            # Performance uses TWO wire formats: cloud models emit validated span JSON (multi-voice
+            # dialogue), local fallback keeps the inline-tag/marker contract.
+            attempt_cloud_json = is_performance and attempt_params["is_cloud"]
+            attempt_system = prompts.get("performance_prompt_json") if attempt_cloud_json else system
+            messages = _build_messages(attempt_system, chunk, prev if i == 0 else "", character_memory)
             sem = _cloud_sem if attempt_params["is_cloud"] else _gpu_sem
             try:
                 async with sem:
                     _t0 = time.time()
+                    extra = {"response_format": {"type": "json_object"}} if attempt_cloud_json else {}
                     resp = await litellm.acompletion(
                         model=attempt_params["litellm_model"],
                         messages=messages,
@@ -323,6 +370,7 @@ async def fix_text(
                         timeout=240,
                         max_tokens=roomy if attempt_params["is_cloud"] else tight,
                         **attempt_params["sampling"],
+                        **extra,
                     )
                 _usage = getattr(resp, "usage", None)
                 pt = getattr(_usage, "prompt_tokens", 0) or 0
@@ -331,7 +379,9 @@ async def fix_text(
                 if attempt_params["is_cloud"]:
                     budget.record(task, attempt_params["model_id"], pt, ct,
                                   _chunk_cost(attempt_params["entry"], pt, ct))
-                out = _clean(resp.choices[0].message.content)
+                raw = resp.choices[0].message.content or ""
+                out = raw if attempt_cloud_json else _clean(raw)
+                out_cloud_json = attempt_cloud_json
                 break
             except Exception as e:  # noqa: BLE001
                 if attempt_params["is_cloud"]:
@@ -346,20 +396,31 @@ async def fix_text(
                 raise  # local failure propagates as before
         if out is None:
             raise RuntimeError(f"chunk {i + 1}/{len(chunks)} failed on all models")
-        log.info("  chunk %d/%d in=%d out=%d model=%s",
-                 i + 1, len(chunks), len(chunk), len(out), active["model_id"])
-        if out:
+        log.info("  chunk %d/%d in=%d out=%d model=%s%s",
+                 i + 1, len(chunks), len(chunk), len(out), active["model_id"],
+                 " (span-json)" if out_cloud_json else "")
+        if is_performance:
+            matched = _parse_perf_json(out, allowed_speakers) if out_cloud_json else _parse_perf_tags(out)
+            perf_matched.update(matched)
+            if on_chunk:
+                on_chunk(i, len(chunks), " ".join(
+                    s["text"] for p in matched.values() for s in p["spans"]))
+        elif out:
             parts.append(out)
             if on_chunk:
                 on_chunk(i, len(chunks), out)
 
-    raw_result = "\n\n".join(parts).strip()
     paragraphs = None
     if is_performance and paragraphs_src is not None:
-        paragraphs = _parse_performance(paragraphs_src, raw_result)
+        # any paragraph the model mangled/dropped falls back to the raw original — never fail a job
+        paragraphs = [
+            perf_matched.get(i) or {"i": i, "src": "raw", "spans": [
+                {"text": src_text, "speaker": "narrator", "delivery": "neutral", "events": []}]}
+            for i, src_text in enumerate(paragraphs_src)
+        ]
         # display text = joined span texts (cues live ONLY in the structured spans, never in prose)
-        result = "\n\n".join(s["text"] for p in paragraphs for s in p["spans"]).strip()
+        result = "\n\n".join(" ".join(s["text"] for s in p["spans"]) for p in paragraphs).strip()
     else:
-        result = raw_result
+        result = "\n\n".join(parts).strip()
     storage.store(primary_id, text, result, meta={"chunks": len(chunks), "task": task, "fallbacks": fallbacks})
     return {"fixed": result, "paragraphs": paragraphs}

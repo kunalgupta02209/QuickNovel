@@ -69,6 +69,17 @@ class Job:
                 self.results[str(it["id"])] = res["fixed"]
                 if res.get("paragraphs") is not None:
                     self.paragraphs[str(it["id"])] = res["paragraphs"]
+                    # server-side ScriptDoc copy (future /scripts sync + debugging)
+                    if self.book_id:
+                        try:
+                            from pathlib import Path
+                            import json as _json
+                            d = Path("data/scripts") / self.book_id / self.script_type
+                            d.mkdir(parents=True, exist_ok=True)
+                            (d / f"c{it['id']}.json").write_text(
+                                _json.dumps(res["paragraphs"], ensure_ascii=False), encoding="utf-8")
+                        except Exception:  # noqa: BLE001
+                            pass
                 self.chars_out += len(res["fixed"])
                 self.progress += 1
             self.status = "done"
