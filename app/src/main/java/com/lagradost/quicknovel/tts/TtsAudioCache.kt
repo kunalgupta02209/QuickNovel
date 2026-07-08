@@ -163,6 +163,37 @@ object TtsAudioCache {
             ?.count { File(it, ".done").exists() } ?: 0
     }
 
+    /** One populated voice directory in the cache (for telemetry: which books have TTS audio). */
+    data class VoiceRef(
+        val bookId: String,
+        val modelId: String,
+        val sid: Int,
+        val chaptersDone: Int,
+        val bytes: Long,
+    )
+
+    /** Walk the whole cache tree (3 shallow levels) — every book/model/voice with audio on disk. */
+    fun allVoices(ctx: Context): List<VoiceRef> = runCatching {
+        val out = ArrayList<VoiceRef>()
+        val rootDir = root(ctx)
+        rootDir.listFiles { f -> f.isDirectory }?.forEach { book ->
+            book.listFiles { f -> f.isDirectory }?.forEach { model ->
+                model.listFiles { f -> f.isDirectory && f.name.startsWith("s") }?.forEach { voice ->
+                    val sid = voice.name.removePrefix("s").toIntOrNull() ?: return@forEach
+                    out.add(
+                        VoiceRef(
+                            bookId = book.name, modelId = model.name, sid = sid,
+                            chaptersDone = voice.listFiles { f -> f.isDirectory && f.name.startsWith("c") }
+                                ?.count { File(it, ".done").exists() } ?: 0,
+                            bytes = dirBytes(voice),
+                        )
+                    )
+                }
+            }
+        }
+        out
+    }.getOrElse { emptyList() }
+
     // ---- deletion ----
 
     fun deleteChapter(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int) {

@@ -101,6 +101,15 @@
             android:textSize="13sp"
             tools:text="Input: …\n\nRewritten: …" />
 
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/telemetry_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:checked="true"
+            android:text="@string/telemetry_report"
+            android:textColor="?attr/textColor" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/save_close"
             android:layout_width="match_parent"

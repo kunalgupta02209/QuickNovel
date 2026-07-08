@@ -2037,19 +2037,28 @@ class ReadActivityViewModel : ViewModel() {
     var ttsServerAutogen by PreferenceDelegate(EPUB_TTS_SERVER_AUTOGEN, false, Boolean::class)
 
     private fun maybeStartAutoPregen(context: Context) {
-        if ((!ttsAutogen && !ttsServerAutogen) || ttsEngineType != TtsEngineType.ON_DEVICE) return
+        // G2 diagnostics: every silent early-return logs its reason (the queue-verification test
+        // reads these to explain "nothing happened").
+        val tag = "RemoteTts"
+        if (!ttsAutogen && !ttsServerAutogen) { android.util.Log.i(tag, "autopregen skipped: both autogen prefs off"); return }
+        if (ttsEngineType != TtsEngineType.ON_DEVICE) { android.util.Log.i(tag, "autopregen skipped: engine != ON_DEVICE"); return }
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
         val ctx = context.applicationContext
         ioSafe {
             // The on-device model must be downloaded to PLAY the cached WAVs (even if the server made them).
             val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
-            if (!com.lagradost.quicknovel.tts.TtsModels.isReady(ctx, def) || !onDeviceLanguageOk()) return@ioSafe
+            if (!com.lagradost.quicknovel.tts.TtsModels.isReady(ctx, def)) {
+                android.util.Log.i(tag, "autopregen skipped: model ${def.id} not downloaded"); return@ioSafe
+            }
+            if (!onDeviceLanguageOk()) { android.util.Log.i(tag, "autopregen skipped: language mismatch"); return@ioSafe }
             // EPUB imports have no downloaded per-chapter files -> nothing to generate.
-            val meta = (book as? QuickBook)?.data?.meta ?: return@ioSafe
+            val meta = (book as? QuickBook)?.data?.meta ?: run {
+                android.util.Log.i(tag, "autopregen skipped: not a QuickBook (EPUB import)"); return@ioSafe
+            }
             val author = meta.author ?: ""
             val total = BookDownloader2Helper.downloadInfo(ctx, author, meta.name, meta.apiName)?.total?.toInt()
-                ?: return@ioSafe
-            if (total <= 0) return@ioSafe
+                ?: run { android.util.Log.i(tag, "autopregen skipped: no downloadInfo (no chapters downloaded)"); return@ioSafe }
+            if (total <= 0) { android.util.Log.i(tag, "autopregen skipped: 0 downloaded chapters"); return@ioSafe }
             val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
             // onBookReady offloads to the server when a URL is set + reachable, else on-device.
             com.lagradost.quicknovel.tts.RemoteTtsManager.onBookReady(

@@ -21,6 +21,24 @@ class BaseApplication : Application(), SingletonImageLoader.Factory, Configurati
         context = base
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        // Device telemetry for the server dashboard (fire-and-forget; only active when a server URL
+        // is configured). Runs in Application so worker-only process incarnations report too.
+        com.lagradost.quicknovel.telemetry.TelemetryManager.init(this)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) =
+                com.lagradost.quicknovel.telemetry.TelemetryManager.onForeground(+1)
+            override fun onActivityStopped(activity: Activity) =
+                com.lagradost.quicknovel.telemetry.TelemetryManager.onForeground(-1)
+            override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+    }
+
     override fun newImageLoader(context: PlatformContext): coil3.ImageLoader {
         // Coil Module will be initialized & setSafe globally when first loadImage() is invoked
         return ImageLoader.buildImageLoader(applicationContext)

@@ -30,6 +30,10 @@ object LlmServerSettingsDialog {
         dialog.setContentView(b.root)
 
         b.serverUrl.setText(getKey<String>(LLM_FIX_SERVER_URL) ?: "")
+        b.telemetrySwitch.isChecked = getKey<Boolean>(com.lagradost.quicknovel.TELEMETRY_ENABLED) != false
+        b.telemetrySwitch.setOnCheckedChangeListener { _, on ->
+            setKey(com.lagradost.quicknovel.TELEMETRY_ENABLED, on)
+        }
         var models: List<RemoteFixClient.ServerModel> = emptyList()
 
         fun url() = b.serverUrl.text.toString().trim()

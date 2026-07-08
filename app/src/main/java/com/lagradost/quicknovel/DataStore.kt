@@ -47,6 +47,8 @@ const val EPUB_TTS_OD_VOICE_STYLE: String = "reader_epub_tts_od_voice_style" // 
 const val EPUB_TTS_OD_AUTOGEN: String = "reader_epub_tts_od_autogen" // Boolean: auto-pregen all downloaded chapters on book open
 const val EPUB_TTS_SERVER_AUTOGEN: String = "reader_epub_tts_server_autogen" // Boolean: offload autogen to the fix server's /tts
 const val TTS_REMOTE_FOLDER: String = "tts_remote_data"             // sub-keyed "<bookId>|<modelId>|<sid>" -> server jobId
+const val TELEMETRY_ENABLED: String = "telemetry_enabled"           // Boolean: report device status to the server dashboard
+const val TELEMETRY_DEVICE_ID: String = "telemetry_device_id"       // String: fallback UUID when ANDROID_ID unavailable
 const val EPUB_TTS_PREFETCH: String = "tts_prefetch_on_open"         // Boolean: cache current section + next chapter on chapter open
 const val TTS_PREGEN_FOLDER: String = "tts_pregen_data"           // sub-keyed by "<bookId>|<modelId>|<sid>" -> TtsPregenRecord
 
