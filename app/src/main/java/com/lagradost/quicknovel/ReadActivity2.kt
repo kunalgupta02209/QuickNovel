@@ -1181,21 +1181,20 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 private var downX = 0f
                 private var downY = 0f
                 private var downTime = 0L
-                private var wasScrolling = false
                 override fun onInterceptTouchEvent(
                     rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent
                 ): Boolean {
                     when (e.actionMasked) {
                         android.view.MotionEvent.ACTION_DOWN -> {
                             downX = e.x; downY = e.y; downTime = e.eventTime
-                            wasScrolling =
-                                rv.scrollState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE
                         }
                         android.view.MotionEvent.ACTION_UP -> {
+                            // A clean tap toggles REGARDLESS of scroll/settle state (touching the list
+                            // stops any fling anyway). A real scroll/fling has large movement, so it
+                            // won't be misread as a tap. (Logs showed the only missed taps were clean
+                            // taps landing while the list was still coasting.)
                             val moved = kotlin.math.hypot(e.x - downX, e.y - downY)
-                            if (!wasScrolling && moved < tapSlop && e.eventTime - downTime < 350) {
-                                viewModel.switchVisibility()
-                            }
+                            if (moved < tapSlop && e.eventTime - downTime < 350) viewModel.switchVisibility()
                         }
                     }
                     return false // observe only; scroll + link taps still work
