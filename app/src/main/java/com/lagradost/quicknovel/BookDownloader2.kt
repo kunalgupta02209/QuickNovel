@@ -828,7 +828,11 @@ object BookDownloader2Helper {
 }
 
 object NotificationHelper {
-    const val CHANNEL_ID = "epubdownloader.general"
+    // v2 id: a fresh channel so the LOW/silent importance actually applies to existing installs
+    // (Android ignores importance changes on an already-created channel). The old DEFAULT channel
+    // vibrated on every per-chapter progress update, buzzing connected smartwatches.
+    const val CHANNEL_ID = "epubdownloader.progress"
+    private const val OLD_CHANNEL_ID = "epubdownloader.general"
     const val CHANNEL_NAME = "Downloads"
     const val CHANNEL_DESCRIPT = "The download notification channel"
     private var hasCreatedNotChanel = false
@@ -859,13 +863,19 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = CHANNEL_NAME //getString(R.string.channel_name)
             val descriptionText = CHANNEL_DESCRIPT//getString(R.string.channel_description)
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            // LOW + no sound/vibration: a background chapter download shouldn't buzz the phone (or a
+            // connected smartwatch) on every processed chapter. Matches the LLM-fix / TTS-pregen channels.
+            val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
+                setSound(null, null)
+                enableVibration(false)
             }
             // Register the channel with the system
             val notificationManager: NotificationManager =
                 this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Drop the old DEFAULT-importance channel that vibrated on every progress update.
+            runCatching { notificationManager.deleteNotificationChannel(OLD_CHANNEL_ID) }
             notificationManager.createNotificationChannel(channel)
         }
     }
