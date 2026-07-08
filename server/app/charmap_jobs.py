@@ -115,17 +115,23 @@ class CharmapJobManager:
                    for j in self.jobs.values())
 
     def maybe_auto_build(self, book_id: str) -> None:
-        """After a /tts/batch stores chapters: extract only the DELTA (new chapters), if enabled."""
-        if not (config_charmap().get("auto_build", True)) or not book_id:
+        """After a /tts/batch stores chapters: extract only the DELTA (new chapters), if enabled.
+        Auto-extraction is CAPPED (cost guard — a 1000+-chapter book must not fire 1000+ cloud
+        calls): the earliest chapters carry the character introductions, so the cap covers the
+        first N; a manual POST /charmap/build extracts any range explicitly."""
+        cfg = config_charmap()
+        if not cfg.get("auto_build", True) or not book_id:
             return
         if self.running_for(book_id):
             return
+        cap = int(cfg.get("auto_build_max_chapters", 40))
         have = set(charmap.extraction_indices(book_id))
         avail = chapter_texts.chapter_indices(book_id)
-        missing = [i for i in avail if i not in have]
+        missing = [i for i in avail if i not in have and i < cap]
         if missing:
             self.submit(book_id, min(missing), max(missing))
-            log.info("charmap auto-build queued for %s (%d new chapters)", book_id, len(missing))
+            log.info("charmap auto-build queued for %s (%d new chapters, cap %d)",
+                     book_id, len(missing), cap)
 
     def list(self) -> list[dict]:
         return [j.summary() for j in sorted(self.jobs.values(), key=lambda j: -j.created)]
