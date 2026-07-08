@@ -710,6 +710,28 @@ class TextAdapter(
                             setOnClickListener {
                                 viewModel.switchVisibility()
                             }
+                            // Selection -> one-shot server fix of the sentence/paragraph (P2).
+                            customSelectionActionModeCallback = object : android.view.ActionMode.Callback {
+                                override fun onCreateActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?): Boolean {
+                                    menu?.add(0, 0xF1F1, 0, context.getString(R.string.fix_selection_grammar))
+                                    menu?.add(0, 0xF1F2, 1, context.getString(R.string.fix_selection_cues))
+                                    return true
+                                }
+                                override fun onPrepareActionMode(mode: android.view.ActionMode?, menu: android.view.Menu?) = false
+                                override fun onActionItemClicked(mode: android.view.ActionMode?, item: android.view.MenuItem?): Boolean {
+                                    val script = when (item?.itemId) {
+                                        0xF1F1 -> com.lagradost.quicknovel.llm.ScriptType.GRAMMAR
+                                        0xF1F2 -> com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
+                                        else -> return false
+                                    }
+                                    viewModel.fixSelection(
+                                        obj.index, obj.text.toString(), selectionStart, selectionEnd, script,
+                                    )
+                                    mode?.finish()
+                                    return true
+                                }
+                                override fun onDestroyActionMode(mode: android.view.ActionMode?) {}
+                            }
                         }
                     } else {
                         movementMethod = LinkMovementMethod.getInstance()

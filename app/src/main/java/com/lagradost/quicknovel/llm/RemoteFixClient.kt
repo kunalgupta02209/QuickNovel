@@ -34,11 +34,15 @@ object RemoteFixClient {
     fun isConfigured(url: String?): Boolean = !url.isNullOrBlank()
 
     /** Synchronous single-chapter fix. Returns null on any failure (caller falls back to on-device). */
-    fun fixSnippet(baseUrl: String, text: String, model: String?, previousChapters: String, memory: String): String? {
+    fun fixSnippet(
+        baseUrl: String, text: String, model: String?, previousChapters: String, memory: String,
+        scriptType: String = "grammar",
+    ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "text" to text,
                 "model" to model?.ifBlank { null },
+                "script_type" to scriptType,
                 "previous_chapters" to previousChapters,
                 "character_memory" to memory,
             )

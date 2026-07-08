@@ -2212,6 +2212,55 @@ class ReadActivityViewModel : ViewModel() {
             .joinToString("\n") { "<p>" + it.trim().replace("\n", " ") + "</p>" }
     }
 
+    /** The chapter as displayed plain text (paragraphs joined) — the base for selection splices. */
+    private fun chapterPlainText(index: Int): String? =
+        chapterIdxToSpanDisplay(index).filterIsInstance<TextSpan>()
+            .joinToString("\n\n") { it.text.toString() }.takeIf { it.isNotBlank() }
+
+    /** Expand a selection to sentence bounds; a selection covering most of the paragraph = whole paragraph. */
+    private fun snapToSentence(p: String, selStart: Int, selEnd: Int): String {
+        val s = selStart.coerceIn(0, p.length)
+        val e = selEnd.coerceIn(s, p.length)
+        if (e - s >= p.length * 3 / 4) return p
+        val start = p.lastIndexOfAny(charArrayOf('.', '!', '?'), (s - 1).coerceAtLeast(0))
+            .let { if (it < 0) 0 else it + 1 }
+        val end = p.indexOfAny(charArrayOf('.', '!', '?'), e)
+            .let { if (it < 0) p.length else it + 1 }
+        return p.substring(start, end).trim().ifBlank { p }
+    }
+
+    /** One-shot fix of a SELECTION (sentence or paragraph) via the server snippet API; the result is
+     *  spliced into the chapter's fixed text in place, and the reader switches to show it. */
+    fun fixSelection(chapterIndex: Int, paragraph: String, selStart: Int, selEnd: Int,
+                     script: com.lagradost.quicknovel.llm.ScriptType) {
+        val ctx = context ?: return
+        if (llmServerUrl.isBlank()) {
+            showToast(R.string.llm_server_enter_url); return
+        }
+        ioSafe {
+            val target = snapToSentence(paragraph, selStart, selEnd)
+            showToast(R.string.sent_fix_to_server)
+            val fixed = com.lagradost.quicknovel.llm.RemoteFixClient.fixSnippet(
+                llmServerUrl, target, llmServerModel, "", "", script.apiValue,
+            )?.trim()?.takeIf { it.isNotBlank() } ?: run {
+                showToast(R.string.llm_test_no_response); return@ioSafe
+            }
+            val base = chapterPlainText(chapterIndex) ?: return@ioSafe
+            if (!base.contains(target)) {
+                showToast(R.string.llm_test_no_response); return@ioSafe
+            }
+            val id = llmBookId() ?: return@ioSafe
+            // Selection fixes accumulate in the GRAMMAR display slot regardless of script — the
+            // performance ScriptDoc (spans) only comes from whole-chapter jobs.
+            com.lagradost.quicknovel.llm.FixedTextCache.save(
+                ctx, id, llmModel, llmPromptVersion, chapterIndex,
+                base.replaceFirst(target, fixed), com.lagradost.quicknovel.llm.ScriptType.GRAMMAR,
+            )
+            runOnMainThread { llmScriptMode = 1 } // show the spliced fix (setter reloads)
+            if (llmScriptMode == 1) refreshChapters() // already in grammar mode -> force reload
+        }
+    }
+
     private fun llmSupertonic(): Boolean =
         ttsEngineType == TtsEngineType.ON_DEVICE && ttsOnDeviceModel == "supertonic"
 
