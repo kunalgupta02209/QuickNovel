@@ -2,22 +2,16 @@ package com.lagradost.quicknovel.tts
 
 import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineTts
-import com.lagradost.quicknovel.BookDownloader2Helper.readDownloadedChapter
 import com.lagradost.quicknovel.TTSHelper
 import com.lagradost.quicknovel.mvvm.logError
-import io.noties.markwon.Markwon
-import io.noties.markwon.SoftBreakAddsNewLinePlugin
-import io.noties.markwon.html.HtmlPlugin
 
 /**
  * Headless per-chapter on-device TTS synthesis into [TtsAudioCache], used by the background
  * pre-generator. Owns its OWN [OfflineTts] (never shares the live playback engine's) and has no
  * AudioTrack / audio focus / queue — it is a pure generate -> trim -> save loop.
  *
- * It reproduces the reader's EXACT text pipeline (preParseHtml -> markwon -> ttsParseText + a
- * prepended title line) so the content-hash cache keys line up byte-for-byte with live playback,
- * and reading a pre-generated chapter is an instant cache hit. Images don't produce spoken words,
- * so a lightweight Markwon (no Coil image plugin) yields identical spoken text.
+ * Chapter text -> spoken lines is delegated to [TtsChapterLines] (shared with live playback + the
+ * remote offload) so the content-hash cache keys line up byte-for-byte.
  */
 class TtsChapterSynthesizer(
     private val context: Context,
@@ -27,11 +21,6 @@ class TtsChapterSynthesizer(
 ) {
     private var tts: OfflineTts? = null
     private var sampleRate: Int = 24000
-
-    private val markwon: Markwon = Markwon.builder(context)
-        .usePlugin(HtmlPlugin.create { it.excludeDefaults(false) })
-        .usePlugin(SoftBreakAddsNewLinePlugin.create())
-        .build()
 
     fun open(numThreads: Int = TtsModels.defaultInferenceThreads): Boolean {
         val config = TtsModels.resolveConfig(context, def, numThreads) ?: return false
@@ -123,16 +112,7 @@ class TtsChapterSynthesizer(
         awaitResume: () -> Unit = {},
     ): Int {
         if (tts == null) return -1
-        val loaded = context.readDownloadedChapter(apiName, author, name, chapterIndex) ?: return 0
-
-        val rawText = TTSHelper.preParseHtml(loaded.html, authorNotes)
-        val rendered = TTSHelper.render(rawText, markwon)
-        val lines = TTSHelper.ttsParseText(rendered.substring(0, rendered.length), chapterIndex)
-        // Prepend the chapter title line exactly as LiveChapterData.ttsLines does.
-        val spokenTitle = loaded.title.trim()
-        if (spokenTitle.isNotBlank()) {
-            lines.add(0, TTSHelper.TTSLine(spokenTitle, startChar = 0, endChar = 0, index = chapterIndex))
-        }
+        val lines = TtsChapterLines.build(context, apiName, author, name, chapterIndex, authorNotes) ?: return 0
         return synthLines(lines, shouldStop, awaitResume, onProgress).also {
             if (it >= 0) TtsAudioCache.markChapterDone(context, bookId, def.id, sid, chapterIndex)
         }

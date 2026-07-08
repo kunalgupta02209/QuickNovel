@@ -540,6 +540,9 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsAutogenSwitch.isChecked = viewModel.ttsAutogen
         b.ttsAutogenSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsAutogen = on }
 
+        b.ttsServerAutogenSwitch.isChecked = viewModel.ttsServerAutogen
+        b.ttsServerAutogenSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsServerAutogen = on }
+
         b.ttsPregenButton.setOnClickListener {
             com.lagradost.quicknovel.ui.tts.TtsGenerateDialog.show(this@ReadActivity2)
         }

@@ -83,7 +83,11 @@ object TtsAudioCache {
      * toggle actually affect cached audio instead of silently reusing a raw cache hit.
      */
     fun fileFor(ctx: Context, bookId: String, modelId: String, sid: Int, line: TTSHelper.TTSLine, variant: String = ""): File =
-        File(chapterDir(ctx, bookId, modelId, sid, line.index), sha1Hex(line.speakOutMsg).take(24) + variant + ".wav")
+        File(chapterDir(ctx, bookId, modelId, sid, line.index), keyFor(line) + variant + ".wav")
+
+    /** The content hash a sentence's WAV is filed under — shared with the server so its output is
+     *  byte-placeable into this cache. Must stay in lockstep with [fileFor]. */
+    fun keyFor(line: TTSHelper.TTSLine): String = sha1Hex(line.speakOutMsg).take(24)
 
     private fun sha1Hex(s: String): String =
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))

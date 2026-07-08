@@ -1,0 +1,167 @@
+package com.lagradost.quicknovel.tts
+
+import android.content.Context
+import com.lagradost.quicknovel.BaseApplication.Companion.getKey
+import com.lagradost.quicknovel.BaseApplication.Companion.removeKey
+import com.lagradost.quicknovel.BaseApplication.Companion.setKey
+import com.lagradost.quicknovel.EPUB_AUTHOR_NOTES
+import com.lagradost.quicknovel.TTS_REMOTE_FOLDER
+import com.lagradost.quicknovel.mvvm.logError
+import kotlinx.coroutines.delay
+import java.io.File
+import java.util.zip.ZipInputStream
+
+/**
+ * Server-offloaded analogue of [TtsPregenManager]: on book download/open, submit the book's uncached
+ * sentences to the /tts server, poll the job, and pull each ready chapter's ZIP straight into
+ * [TtsAudioCache] (same voice + keys, so playback is an instant cache hit). Shares the cache + key
+ * space with on-device pre-gen, so either producer resumes the other's partial work.
+ */
+object RemoteTtsManager {
+
+    data class RemoteTtsRequest(
+        val bookId: Int,
+        val apiName: String,
+        val author: String?,
+        val name: String,
+        val posterUrl: String?,
+        val modelId: String,
+        val sid: Int,
+        val sampleRate: Int,
+        val rangeStart: Int,
+        val rangeEnd: Int,
+        val serverUrl: String,
+    ) {
+        val key: String get() = "$bookId|$modelId|$sid"
+        val notifId: Int get() = key.hashCode() xor 0x77260000.toInt()
+    }
+
+    private val lock = Any()
+    private val currentJobs = HashSet<String>()
+    private val stopRequested = HashSet<String>()
+
+    fun isRunning(key: String): Boolean = synchronized(lock) { currentJobs.contains(key) }
+    fun requestStop(key: String) = synchronized(lock) { if (currentJobs.contains(key)) stopRequested.add(key) }
+    private fun shouldStop(key: String): Boolean = synchronized(lock) { stopRequested.contains(key) }
+
+    /**
+     * The single entry point used by both triggers (book download-complete + book open). Picks the
+     * server when a URL is set + reachable, else falls back to on-device pre-gen. No-op if already
+     * running (either producer) or fully cached.
+     */
+    fun onBookReady(context: Context, req: RemoteTtsRequest) {
+        val key = req.key
+        if (TtsPregenManager.isRunning(key) || isRunning(key)) return
+        val ctx = context.applicationContext
+        val bookIdStr = "b${req.bookId}"
+        val total = req.rangeEnd - req.rangeStart + 1
+        if (total <= 0) return
+        if (TtsAudioCache.doneChapterCount(ctx, bookIdStr, req.modelId, req.sid) >= total) return
+
+        if (req.serverUrl.isNotBlank() && RemoteTtsClient.reachable(req.serverUrl)) {
+            com.lagradost.quicknovel.RemoteTtsWorkManager.enqueue(ctx, req) // server-offloaded
+        } else {
+            // On-device fallback (same key space -> shared dedupe).
+            TtsPregenManager.ensureAutoPregen(
+                ctx,
+                TtsPregenManager.PregenRequest(
+                    bookId = req.bookId, apiName = req.apiName, author = req.author, name = req.name,
+                    posterUrl = req.posterUrl, modelId = req.modelId, sid = req.sid,
+                    rangeStart = req.rangeStart, rangeEnd = req.rangeEnd,
+                ),
+            )
+        }
+    }
+
+    suspend fun runJob(context: Context, req: RemoteTtsRequest) {
+        val key = req.key
+        synchronized(lock) { if (!currentJobs.add(key)) return; stopRequested.remove(key) }
+        val ctx = context.applicationContext
+        val bookIdStr = "b${req.bookId}"
+        val def = TtsModels.byId(req.modelId)
+        val authorNotes = getKey<Boolean>(EPUB_AUTHOR_NOTES, true) ?: true
+        val total = req.rangeEnd - req.rangeStart + 1
+        try {
+            // 1) Build the work-list: only chapters with uncached sentences (skip .done + on-disk WAVs).
+            val chapters = ArrayList<RemoteTtsClient.ChapterReq>()
+            var alreadyDone = 0
+            for (index in req.rangeStart..req.rangeEnd) {
+                if (shouldStop(key)) return
+                if (TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) { alreadyDone++; continue }
+                val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes) ?: continue
+                val sentences = lines
+                    .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
+                    .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
+                if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences))
+            }
+            if (chapters.isEmpty()) {
+                RemoteTtsNotifications.update(ctx, req, total, total, finished = true)
+                return
+            }
+
+            // 2) Resume a still-live server job, else submit a fresh one.
+            val prevJobId = getKey<String>(TTS_REMOTE_FOLDER, key)
+            var jobId = prevJobId?.takeIf {
+                RemoteTtsClient.getJob(req.serverUrl, it)?.status in setOf("running", "queued")
+            }
+            if (jobId == null) {
+                jobId = RemoteTtsClient.submitBatch(req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters)
+                    ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
+            }
+            runCatching { setKey(TTS_REMOTE_FOLDER, key, jobId) }
+
+            // 3) Poll + pull each ready chapter's audio into the cache.
+            val fetched = HashSet<Int>()
+            while (true) {
+                if (shouldStop(key)) { RemoteTtsClient.cancelJob(req.serverUrl, jobId); return }
+                val job = RemoteTtsClient.getJob(req.serverUrl, jobId) ?: return
+                for (idx in job.readyChapters) {
+                    if (idx in fetched) continue
+                    if (fetchChapter(ctx, req, def, idx)) {
+                        TtsAudioCache.markChapterDone(ctx, bookIdStr, def.id, req.sid, idx)
+                        fetched.add(idx)
+                        RemoteTtsNotifications.update(ctx, req, alreadyDone + fetched.size, total, finished = false)
+                    }
+                }
+                when (job.status) {
+                    "done" -> break
+                    "error", "cancelled" -> break
+                    else -> delay(2000)
+                }
+            }
+            runCatching { removeKey(TTS_REMOTE_FOLDER, key) }
+            RemoteTtsNotifications.update(ctx, req, alreadyDone + fetched.size, total, finished = true)
+        } catch (t: Throwable) {
+            logError(t)
+        } finally {
+            synchronized(lock) { currentJobs.remove(key); stopRequested.remove(key) }
+        }
+    }
+
+    /** Download one chapter's ZIP and drop each <key>.wav straight into the cache dir (no re-encode). */
+    private fun fetchChapter(ctx: Context, req: RemoteTtsRequest, def: TtsModels.ModelDef, index: Int): Boolean {
+        val bookIdStr = "b${req.bookId}"
+        val dir = TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, req.sid, index)
+        dir.mkdirs()
+        val stream = RemoteTtsClient.openChapterZip(req.serverUrl, bookIdStr, def.id, req.sid, index) ?: return false
+        return try {
+            ZipInputStream(stream.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = File(entry.name).name // entry is already "<key>.wav"
+                    if (name.endsWith(".wav")) {
+                        val dest = File(dir, name)
+                        val tmp = File(dir, "$name.${Thread.currentThread().id}.${System.nanoTime()}.part")
+                        tmp.outputStream().use { zip.copyTo(it) }
+                        tmp.renameTo(dest)
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+            true
+        } catch (t: Throwable) {
+            logError(t); false
+        }
+    }
+}

@@ -53,6 +53,8 @@
     <string name="tts_prefetch_on_open_desc">When you open a chapter, generate on-device TTS for it and the next chapter so playback and skipping are instant</string>
     <string name="tts_autogen">Auto-generate TTS for the whole book</string>
     <string name="tts_autogen_desc">On opening a book, background-generate TTS (default voice) for every downloaded chapter, using multiple threads</string>
+    <string name="tts_server_autogen">Generate audio on the server</string>
+    <string name="tts_server_autogen_desc">Offload whole-book TTS generation to the configured AI server (falls back to on-device if unreachable)</string>
     <string name="tts_voice_style">Voice style</string>
     <string name="tts_style_natural">Natural</string>
     <string name="tts_style_warm">Warm</string>

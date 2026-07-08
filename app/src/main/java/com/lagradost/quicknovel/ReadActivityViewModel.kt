@@ -2006,30 +2006,38 @@ class ReadActivityViewModel : ViewModel() {
             )
         }
 
-    // Feature 3: auto-pregen all downloaded chapters (multi-threaded) as soon as the book opens.
+    // Feature 3: auto-generate all downloaded chapters when the book opens. ttsAutogen = on-device;
+    // ttsServerAutogen = offload that generation to the fix server's /tts (falls back to on-device).
     var ttsAutogen by PreferenceDelegate(EPUB_TTS_OD_AUTOGEN, false, Boolean::class)
+    var ttsServerAutogen by PreferenceDelegate(EPUB_TTS_SERVER_AUTOGEN, false, Boolean::class)
 
     private fun maybeStartAutoPregen(context: Context) {
-        if (!ttsAutogen || ttsEngineType != TtsEngineType.ON_DEVICE) return
+        if ((!ttsAutogen && !ttsServerAutogen) || ttsEngineType != TtsEngineType.ON_DEVICE) return
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
         val ctx = context.applicationContext
         ioSafe {
+            // The on-device model must be downloaded to PLAY the cached WAVs (even if the server made them).
             val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
             if (!com.lagradost.quicknovel.tts.TtsModels.isReady(ctx, def) || !onDeviceLanguageOk()) return@ioSafe
-            // EPUB imports have no downloaded per-chapter files -> nothing to pre-generate.
+            // EPUB imports have no downloaded per-chapter files -> nothing to generate.
             val meta = (book as? QuickBook)?.data?.meta ?: return@ioSafe
             val author = meta.author ?: ""
             val total = BookDownloader2Helper.downloadInfo(ctx, author, meta.name, meta.apiName)?.total?.toInt()
                 ?: return@ioSafe
             if (total <= 0) return@ioSafe
             val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
-            val req = com.lagradost.quicknovel.tts.TtsPregenManager.PregenRequest(
-                bookId = BookDownloader2Helper.generateId(meta.apiName, author, meta.name),
-                apiName = meta.apiName, author = author, name = meta.name,
-                posterUrl = (book as? QuickBook)?.data?.poster,
-                modelId = def.id, sid = sid, rangeStart = 0, rangeEnd = total - 1,
+            // onBookReady offloads to the server when a URL is set + reachable, else on-device.
+            com.lagradost.quicknovel.tts.RemoteTtsManager.onBookReady(
+                ctx,
+                com.lagradost.quicknovel.tts.RemoteTtsManager.RemoteTtsRequest(
+                    bookId = BookDownloader2Helper.generateId(meta.apiName, author, meta.name),
+                    apiName = meta.apiName, author = author, name = meta.name,
+                    posterUrl = (book as? QuickBook)?.data?.poster,
+                    modelId = def.id, sid = sid, sampleRate = 24000,
+                    rangeStart = 0, rangeEnd = total - 1,
+                    serverUrl = if (ttsServerAutogen) llmServerUrl else "",
+                ),
             )
-            com.lagradost.quicknovel.tts.TtsPregenManager.ensureAutoPregen(ctx, req)
         }
     }
 
