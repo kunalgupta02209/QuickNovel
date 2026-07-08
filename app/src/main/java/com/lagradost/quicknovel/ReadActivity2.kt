@@ -975,7 +975,13 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         // Bottom bar must clear the nav bar now that decor no longer fits system windows (the toolbar
         // top is already handled by fixPaddingStatusbar above).
         ViewCompat.setOnApplyWindowInsetsListener(binding.readerBottomViewHolder) { v, insets ->
-            v.updatePadding(bottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom)
+            // Apply the nav-bar inset ONCE (it's stable) then detach — otherwise this fires on every
+            // system-bar hide/show toggle (0 <-> height), re-laying-out the bottom bar on each tap.
+            val bottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+            if (bottom > 0) {
+                v.updatePadding(bottom = bottom)
+                ViewCompat.setOnApplyWindowInsetsListener(v, null)
+            }
             insets
         }
 
@@ -1211,9 +1217,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 // when the text is very low
             } else {
                 hideSystemUI()
-                // otherwise we have a shitty bug with tts locking range
-                binding.root.post {
-                    updateTTSLine(viewModel.ttsLine.value)
+                // otherwise we have a shitty bug with tts locking range — but this rebinds ALL visible
+                // rows, so only do it while TTS is actually highlighting a line. When idle it's pure
+                // wasted main-thread work landing on the hide animation (the tap-to-hide lag).
+                if (viewModel.ttsLine.value != null) {
+                    binding.root.post { updateTTSLine(viewModel.ttsLine.value) }
                 }
             }
         }
