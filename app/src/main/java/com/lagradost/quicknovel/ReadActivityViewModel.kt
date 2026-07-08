@@ -18,6 +18,7 @@ import androidx.core.graphics.toColorInt
 import androidx.core.text.getSpans
 import androidx.core.text.toSpanned
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -551,6 +552,35 @@ class ReadActivityViewModel : ViewModel() {
     // the reader flickers the highlight until playback starts.
     private val _ttsPending = MutableLiveData(false)
     val ttsPending: LiveData<Boolean> = _ttsPending
+
+    // Sentences currently being synthesized in the background (drives the reader's "generating"
+    // pulsating underline). The global tracker is filtered to the active book/voice scope.
+    private val _ttsCacheScope = MutableLiveData<Triple<String, String, Int>?>(null) // (bookId, modelId, sid)
+    private val _ttsGenerating = MediatorLiveData<List<TTSHelper.TTSLine>>(emptyList()).apply {
+        addSource(com.lagradost.quicknovel.tts.TtsGenerationTracker.snapshot) { recomputeGenerating() }
+        addSource(_ttsCacheScope) { recomputeGenerating() }
+    }
+    val ttsGenerating: LiveData<List<TTSHelper.TTSLine>> = _ttsGenerating
+
+    private fun recomputeGenerating() {
+        val scope = _ttsCacheScope.value
+        val set = com.lagradost.quicknovel.tts.TtsGenerationTracker.snapshot.value ?: emptySet()
+        _ttsGenerating.value = if (scope == null) emptyList()
+        else set.asSequence()
+            .filter { it.bookId == scope.first && it.modelId == scope.second && it.sid == scope.third }
+            .filter { it.endChar > it.startChar } // skip the zero-width title line
+            .map { TTSHelper.TTSLine("", startChar = it.startChar, endChar = it.endChar, index = it.index) }
+            .toList()
+    }
+
+    private fun refreshTtsCacheScope() {
+        if (ttsEngineType != TtsEngineType.ON_DEVICE || !::book.isInitialized) { _ttsCacheScope.postValue(null); return }
+        val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
+        val bookId = runCatching { com.lagradost.quicknovel.tts.TtsAudioCache.bookIdFor(book) }.getOrNull()
+        if (bookId == null) { _ttsCacheScope.postValue(null); return }
+        val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
+        _ttsCacheScope.postValue(Triple(bookId, def.id, sid))
+    }
 
 
     /*  private val _orientation: MutableLiveData<OrientationType> =
@@ -1321,6 +1351,7 @@ class ReadActivityViewModel : ViewModel() {
         _title.postValue(book.title())
 
         maybeStartAutoPregen(context)
+        refreshTtsCacheScope() // scope the "generating" underline to this book/voice
         updateChapters()
         val imageLoader: ImageLoader = SingletonImageLoader.get(context)
 
@@ -1853,6 +1884,7 @@ class ReadActivityViewModel : ViewModel() {
         lastChangeIndex?.let { setScrollKeys(it) }
         com.lagradost.quicknovel.tts.TtsPrefetchManager.cancelAll()
         com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
+        _ttsCacheScope.postValue(null) // blank the "generating" underlines on close
         ttsSession?.release()
         ttsSession = null
         mlTranslator?.close()
@@ -2187,6 +2219,7 @@ class ReadActivityViewModel : ViewModel() {
         // Voice/model changed: abandon any prefetch keyed to the old voice + release the gate.
         com.lagradost.quicknovel.tts.TtsPrefetchManager.cancelAll()
         com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
+        refreshTtsCacheScope() // re-scope the "generating" underline to the new voice/model (or null)
         val wasRunning = isTTSRunning()
         stopTTS()
         ttsSession?.release()

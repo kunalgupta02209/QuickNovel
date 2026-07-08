@@ -75,25 +75,32 @@ class TtsChapterSynthesizer(
             if (shouldStop()) return -1
             val f = TtsAudioCache.fileFor(context, bookId, def.id, sid, line)
             if (!f.exists()) {
-                val chunks = ArrayList<FloatArray>()
-                var n = 0
-                val sink: (FloatArray) -> Int = cb@{ s ->
-                    if (shouldStop()) return@cb 0
-                    val c = s.copyOf(); chunks.add(c); n += c.size; 1
-                }
+                // Publish this sentence as "generating" (reader underline). try/finally drains it even
+                // on the early return -1 paths below.
+                TtsGenerationTracker.markStart(bookId, def.id, sid, line)
                 try {
-                    if (gen != null)
-                        engine.generateWithConfigAndCallback(text = line.speakOutMsg, config = gen, callback = sink)
-                    else
-                        engine.generateWithCallback(text = line.speakOutMsg, sid = sid, speed = 1.0f, callback = sink)
-                } catch (t: Throwable) {
-                    logError(t); return -1
+                    val chunks = ArrayList<FloatArray>()
+                    var n = 0
+                    val sink: (FloatArray) -> Int = cb@{ s ->
+                        if (shouldStop()) return@cb 0
+                        val c = s.copyOf(); chunks.add(c); n += c.size; 1
+                    }
+                    try {
+                        if (gen != null)
+                            engine.generateWithConfigAndCallback(text = line.speakOutMsg, config = gen, callback = sink)
+                        else
+                            engine.generateWithCallback(text = line.speakOutMsg, sid = sid, speed = 1.0f, callback = sink)
+                    } catch (t: Throwable) {
+                        logError(t); return -1
+                    }
+                    if (shouldStop()) return -1
+                    val raw = FloatArray(n)
+                    var o = 0
+                    for (c in chunks) { System.arraycopy(c, 0, raw, o, c.size); o += c.size }
+                    TtsAudioCache.save(f, TtsAudioCache.trimSilence(raw), sampleRate)
+                } finally {
+                    TtsGenerationTracker.markDone(bookId, def.id, sid, line)
                 }
-                if (shouldStop()) return -1
-                val raw = FloatArray(n)
-                var o = 0
-                for (c in chunks) { System.arraycopy(c, 0, raw, o, c.size); o += c.size }
-                TtsAudioCache.save(f, TtsAudioCache.trimSilence(raw), sampleRate)
             }
             done++
             onProgress(done, lines.size)

@@ -415,6 +415,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
     fun onScroll() {
         postLines(getAllLines())
+        updatePulse() // stop/resume the pulse as generating rows leave/enter the viewport
     }
 
     private var cachedChapter: List<SpanDisplay> = emptyList()
@@ -620,12 +621,22 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         return out
     }
 
-    /** Pulse the highlighted line's background while its audio is still generating (a skip landed
-     *  beyond the ready look-ahead); steady once playback starts (ttsPending -> false). */
-    private fun updateTtsFlicker() {
+    private fun hasVisibleGeneratingSpans(): Boolean =
+        visibleRoundedViews().any { v ->
+            (v.text as? android.text.Spanned)?.let { sp ->
+                sp.getSpans(0, sp.length, android.text.Annotation::class.java).any { it.value == "generating" }
+            } == true
+        }
+
+    /** ONE shared pulse animator driving two independent alphas:
+     *  - the skip-pending highlight background (roundedBgAlpha) — only while playback is stalled;
+     *  - the "generating" underlines (generatingAlpha) — while any on-screen sentence is synthesizing.
+     *  The playback highlight stays SOLID when only generating (recomputed inside the listener). */
+    private fun updatePulse() {
         val flicker = viewModel.ttsPending.value == true &&
                 viewModel.ttsStatus.value == TTSHelper.TTSStatus.IsRunning
-        if (flicker) {
+        val generating = hasVisibleGeneratingSpans()
+        if (flicker || generating) {
             if (ttsFlicker?.isRunning == true) return
             ttsFlicker = android.animation.ValueAnimator.ofInt(255, 70).apply {
                 duration = 520
@@ -633,14 +644,29 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 repeatCount = android.animation.ValueAnimator.INFINITE
                 addUpdateListener { a ->
                     val alpha = a.animatedValue as Int
-                    visibleRoundedViews().forEach { it.roundedBgAlpha = alpha }
+                    val f = viewModel.ttsPending.value == true &&
+                            viewModel.ttsStatus.value == TTSHelper.TTSStatus.IsRunning
+                    visibleRoundedViews().forEach {
+                        it.generatingAlpha = alpha
+                        it.roundedBgAlpha = if (f) alpha else 255 // keep the playback highlight solid
+                    }
                 }
                 start()
             }
         } else {
             ttsFlicker?.cancel(); ttsFlicker = null
-            visibleRoundedViews().forEach { it.roundedBgAlpha = 255 }
+            visibleRoundedViews().forEach { it.roundedBgAlpha = 255; it.generatingAlpha = 255 }
         }
+    }
+
+    /** Push the set of currently-generating sentences to the adapter + rebind the visible window so
+     *  the "generating" underlines appear/vanish. Not gated on playback — underlines show while reading. */
+    private fun updateGenerating(lines: List<TTSHelper.TTSLine>) {
+        textAdapter.updateGenerating(lines)
+        val first = textLayoutManager.findFirstVisibleItemPosition()
+        val last = textLayoutManager.findLastVisibleItemPosition()
+        if (first >= 0 && last >= first) textAdapter.notifyItemRangeChanged(first, last + 1 - first)
+        binding.realText.post { updatePulse() } // post: scan spans AFTER the rebind applies them
     }
 
     private fun updateTTSLine(line: TTSHelper.TTSLine?, depth: Int = 0) {
@@ -883,6 +909,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
     override fun onDestroy() {
         viewModel.stopTTS()
+        ttsFlicker?.cancel(); ttsFlicker = null
         this.unregisterReceiver(mBatInfoReceiver)
         super.onDestroy()
     }
@@ -1119,10 +1146,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             true
         }*/
 
-        observe(viewModel.ttsPending) { updateTtsFlicker() }
+        observe(viewModel.ttsPending) { updatePulse() }
+        observe(viewModel.ttsGenerating) { updateGenerating(it) }
         observe(viewModel.ttsStatus) { status ->
             val isTTSRunning = status != TTSHelper.TTSStatus.IsStopped
-            updateTtsFlicker()
+            updatePulse()
 
             // Hide the novel title from the toolbar while read-aloud is active, restore it when stopped.
             isReadAloudActive = isTTSRunning

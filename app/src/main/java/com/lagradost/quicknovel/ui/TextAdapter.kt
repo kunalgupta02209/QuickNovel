@@ -164,6 +164,35 @@ fun setHighLightedText(tv: TextView, start: Int, end: Int) {
     }
 }
 
+/** Remove the "generating" underline spans (parallel to [removeHighLightedText]; never touches "rounded"). */
+fun removeGeneratingText(tv: TextView) {
+    val sp: Spannable = SpannableString(tv.text)
+    var changed = false
+    for (s in sp.getSpans<android.text.Annotation>(0, tv.text.length))
+        if (s.value == "generating") { sp.removeSpan(s); changed = true }
+    if (changed) tv.setText(sp, TextView.BufferType.SPANNABLE)
+}
+
+/** Apply the "generating" underline over a LIST of ranges (multiple background workers may cover one row). */
+fun setGeneratingText(tv: TextView, ranges: List<IntRange>) {
+    try {
+        val sp: Spannable = SpannableString(tv.text)
+        val length = tv.text.length
+        for (s in sp.getSpans<android.text.Annotation>(0, length))
+            if (s.value == "generating") sp.removeSpan(s)
+        for (r in ranges) {
+            val start = minOf(maxOf(r.first, 0), length)
+            val end = minOf(maxOf(r.last, 0), length)
+            if (end > start) sp.setSpan(
+                android.text.Annotation("", "generating"), start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        tv.setText(sp, TextView.BufferType.SPANNABLE)
+    } catch (t: Throwable) {
+        logError(t)
+    }
+}
+
 const val CONFIG_COLOR = 1 shl 0
 const val CONFIG_FONT = 1 shl 1
 const val CONFIG_SIZE = 1 shl 2
@@ -267,6 +296,8 @@ class TextAdapter(
 ) :
     NoStateAdapter<SpanDisplay>(DiffCallback()) {
     private var currentTTSLine: TTSHelper.TTSLine? = null
+    private var currentGenerating: List<TTSHelper.TTSLine> = emptyList()
+    fun updateGenerating(lines: List<TTSHelper.TTSLine>) { currentGenerating = lines }
 
     fun changeHeight(height: Int): Boolean {
         if (config.toolbarHeight == height) return false
@@ -504,6 +535,8 @@ class TextAdapter(
                 // we do not have to update it with null
                 if (currentTTSLine != null)
                     this.updateTTSLine(binding, item, currentTTSLine)
+                // unconditional: a recycled row must have any stale "generating" span cleared too
+                this.updateGenerating(binding, item, currentGenerating)
             }
 
             is LoadingSpanned -> {
@@ -715,6 +748,19 @@ class TextAdapter(
             start,
             end
         )
+    }
+
+    /** Apply the "generating" underline for any of [lines] that overlap this row's [span]. */
+    fun updateGenerating(binding: ViewBinding, span: TextSpan, lines: List<TTSHelper.TTSLine>) {
+        if (binding !is SingleTextBinding) return
+        val ranges = lines.mapNotNull { line ->
+            if (line.index != span.index) return@mapNotNull null
+            if (line.endChar < span.start || line.startChar > span.end) return@mapNotNull null
+            val s = line.startChar - span.start
+            val e = line.endChar - span.start
+            if (e > s) s..e else null
+        }
+        if (ranges.isEmpty()) removeGeneratingText(binding.root) else setGeneratingText(binding.root, ranges)
     }
 
     private fun setConfig(binding: ViewBinding, config: TextConfig) {

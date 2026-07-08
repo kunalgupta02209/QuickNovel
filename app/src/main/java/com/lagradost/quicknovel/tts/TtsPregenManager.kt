@@ -179,6 +179,7 @@ object TtsPregenManager {
         } catch (t: Throwable) {
             logError(t); finalState = DownloadState.IsFailed
         } finally {
+            TtsGenerationTracker.clear(bookIdStr, def.id, req.sid) // drop any lingering "generating" marks
             emit(ctx, req, finalState, done.get(), total)
             synchronized(lock) { currentJobs.remove(key); pendingAction.remove(key) }
         }
