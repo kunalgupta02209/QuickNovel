@@ -2057,7 +2057,13 @@ class ReadActivityViewModel : ViewModel() {
             }
             val author = meta.author ?: ""
             val total = BookDownloader2Helper.downloadInfo(ctx, author, meta.name, meta.apiName)?.total?.toInt()
-                ?: run { android.util.Log.i(tag, "autopregen skipped: no downloadInfo (no chapters downloaded)"); return@ioSafe }
+                ?: run {
+                    android.util.Log.i(
+                        tag,
+                        "autopregen skipped: no downloadInfo (no chapters downloaded) " +
+                                "api='${meta.apiName}' author='$author' name='${meta.name}'"
+                    ); return@ioSafe
+                }
             if (total <= 0) { android.util.Log.i(tag, "autopregen skipped: 0 downloaded chapters"); return@ioSafe }
             val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
             // onBookReady offloads to the server when a URL is set + reachable, else on-device.
