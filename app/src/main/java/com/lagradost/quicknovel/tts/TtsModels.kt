@@ -156,7 +156,25 @@ object TtsModels {
             VoiceLabel("Leo", "Male · balanced, natural — all-round default narrator"),
             VoiceLabel("Kiki", "Female · light, warm — friendly, intimate reading"),
         ),
-        // kokoro (11) / supertonic / zipvoice intentionally omitted -> "Voice N" fallback
+        "kokoro" to listOf(
+            VoiceLabel("Ava", "American female · warm, natural — balanced default narrator"),
+            VoiceLabel("Bella", "American female · warm, rich — expressive, engaging narration"),
+            VoiceLabel("Nicole", "American female · soft, breathy — intimate, ASMR-style reading"),
+            VoiceLabel("Sarah", "American female · clear, even — steady everyday narration"),
+            VoiceLabel("Sky", "American female · light, youthful — bright, casual reading"),
+            VoiceLabel("Adam", "American male · deep, heavy — bold male narration"),
+            VoiceLabel("Michael", "American male · warm, steady — natural male narration"),
+            VoiceLabel("Emma", "British female · warm, refined — polished British narration"),
+            VoiceLabel("Isabella", "British female · smooth, measured — calm British reading"),
+            VoiceLabel("George", "British male · mellow, mature — relaxed British narration"),
+            VoiceLabel("Lewis", "British male · deep, mellow — low, unhurried narration"),
+        ),
+        "supertonic" to listOf(
+            VoiceLabel("Milo", "Male · lively, upbeat — expressive, reads inline <laugh>/<sigh>/<breath> tags"),
+        ),
+        "zipvoice" to listOf(
+            VoiceLabel("Nova", "Female · crisp, newsreader tone — zero-shot clone of the bundled zh-en reference"),
+        ),
     )
 
     /** Labels for every speaker of [def]; length always == speakerCount. Falls back to
