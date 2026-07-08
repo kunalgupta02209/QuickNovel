@@ -514,6 +514,20 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsServerAutogenSwitch.isChecked = viewModel.ttsServerAutogen
         b.ttsServerAutogenSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsServerAutogen = on }
 
+        b.ttsCachedButton.setOnClickListener {
+            // Per-chapter TTS cache overview for the current book+voice; tap a chapter to jump there.
+            viewModel.cachedChapterOverview { items ->
+                if (items.isEmpty()) return@cachedChapterOverview
+                val builder = AlertDialog.Builder(this@ReadActivity2)
+                builder.setTitle(getString(R.string.tts_cached_chapters))
+                val adapter = ArrayAdapter<String>(this@ReadActivity2, R.layout.chapter_select_dialog)
+                adapter.addAll(items)
+                builder.setNegativeButton(R.string.cancel) { dlg, _ -> dlg.dismiss() }
+                builder.setAdapter(adapter) { _, which -> viewModel.seekToChapter(which) }
+                builder.create().show()
+            }
+        }
+
         b.ttsPregenButton.setOnClickListener {
             com.lagradost.quicknovel.ui.tts.TtsGenerateDialog.show(this@ReadActivity2)
         }

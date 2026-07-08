@@ -2082,6 +2082,26 @@ class ReadActivityViewModel : ViewModel() {
         }
     }
 
+    /** Per-chapter TTS cache state for the current book+voice: "✓ done · ◐ partial · · none" rows
+     *  (same order as the chapter list, so a tap can jump). Runs off-main; result posted to main. */
+    fun cachedChapterOverview(onResult: (List<String>) -> Unit) {
+        val ctx = context ?: return
+        ioSafe {
+            if (!::book.isInitialized) return@ioSafe
+            val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
+            val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
+            val bookId = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull() ?: return@ioSafe
+            val items = (0 until book.size()).map { i ->
+                val done = TtsAudioCache.isChapterDone(ctx, bookId, def.id, sid, i)
+                val partial = !done && TtsAudioCache.chapterDir(ctx, bookId, def.id, sid, i)
+                    .listFiles()?.any { f -> f.name.endsWith(".wav") } == true
+                val mark = if (done) "✓" else if (partial) "◐" else "·"
+                "$mark  ${book.getChapterTitle(i).asString(ctx)}"
+            }
+            runOnMainThread { onResult(items) }
+        }
+    }
+
     // Feature 2: prefetch-on-open (app setting "tts_prefetch_on_open").
     private val prefetchOnOpen: Boolean
         get() = context?.let {

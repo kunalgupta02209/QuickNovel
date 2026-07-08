@@ -208,6 +208,15 @@
                 android:text="@string/tts_pregen_manage"
                 app:icon="@drawable/ic_baseline_record_voice_over_24"
                 app:iconGravity="textStart" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/tts_cached_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/tts_cached_chapters"
+                app:icon="@drawable/ic_baseline_volume_up_24"
+                app:iconGravity="textStart" />
         </LinearLayout>
 
         <com.google.android.material.button.MaterialButton

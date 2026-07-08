@@ -106,9 +106,9 @@ function deviceCard(d) {
   (d.books || []).filter(b => b.downloading || (act.downloads||[]).some(a => a.id === b.id)).forEach(b =>
     rows.push(`<tr><td>book sync</td><td>${esc(b.name)}</td><td>${b.downloaded}/${b.total}${bar(b.downloaded, b.total, 'running')}</td></tr>`));
   (act.downloads || []).forEach(a => rows.push(`<tr><td>download</td><td>#${esc(a.id)} ${esc(a.state)}</td><td>${a.downloaded}/${a.total}${bar(a.downloaded, a.total, 'running')}</td></tr>`));
-  (act.tts_remote || []).forEach(a => rows.push(`<tr><td>chapter sync → server</td><td>${esc(a.key)} <span style="color:var(--dim)">job ${esc(a.job_id||'…')}</span></td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
-  (act.tts_pregen || []).forEach(a => rows.push(`<tr><td>on-device TTS</td><td>${esc(a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
-  (act.llm_fix || []).forEach(a => rows.push(`<tr><td>grammar fix</td><td>${esc(a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (act.tts_remote || []).forEach(a => rows.push(`<tr><td>chapter sync → server</td><td>${esc(a.name || a.key)} <span style="color:var(--dim)">job ${esc(a.job_id||'…')}</span></td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (act.tts_pregen || []).forEach(a => rows.push(`<tr><td>on-device TTS</td><td>${esc(a.name || a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (act.llm_fix || []).forEach(a => rows.push(`<tr><td>grammar fix</td><td>${esc(a.name || a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
   (d.tts_cache || []).forEach(c => rows.push(`<tr><td>tts cache</td><td>${esc(c.name || c.book)} · ${esc(c.model)}/s${c.sid}</td><td>${c.chapters_done}/${c.total} ch · ${fmtMb((c.bytes||0)/1048576)}</td></tr>`));
   return `<div style="margin-bottom:12px">
     <b>${esc(d.device_name || d.device_id)}</b>

@@ -116,7 +116,20 @@ object TelemetryManager {
         seq += 1
 
         val progress = synchronized(BookDownloader2.downloadProgress) { HashMap(BookDownloader2.downloadProgress) }
+        // In-memory downloadData is empty until the downloads UI loads; merge the PERSISTED records
+        // (downloads_data/<id>) so names resolve even right after a cold start.
         val data = synchronized(BookDownloader2.downloadData) { HashMap(BookDownloader2.downloadData) }
+        runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeys(com.lagradost.quicknovel.DOWNLOAD_FOLDER)
+                ?.forEach { fullKey ->
+                    val id = fullKey.substringAfterLast('/').toIntOrNull() ?: return@forEach
+                    if (!data.containsKey(id)) {
+                        com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                            fullKey, com.lagradost.quicknovel.ui.download.DownloadFragment.DownloadData::class.java
+                        )?.let { data[id] = it }
+                    }
+                }
+        }
         val books = data.entries.take(300).map { (id, d) ->
             val p = progress[id]
             mapOf(
@@ -133,19 +146,44 @@ object TelemetryManager {
                 mapOf("id" to id, "state" to p.state.name, "progress" to p.progress,
                       "downloaded" to p.downloaded, "total" to p.total)
             }
+        // Resolve opaque book ids to display names for the dashboard ("b<id>" and "<id>|model|sid").
+        // Fallback chain: in-memory/persisted records -> the download FILESYSTEM itself (an old
+        // install can lose the records while files/<api>/<author>/<book>/N.txt remain; ids are
+        // generateId(api, author, book) over those exact directory names, so the scan is exact).
+        val idToName = HashMap<String, String>()
+        data.forEach { (id, d) -> idToName[id.toString()] = d.name }
+        runCatching {
+            val skip = setOf("tts-cache", "rList")
+            ctx.filesDir.listFiles { f -> f.isDirectory && f.name !in skip }?.forEach { api ->
+                api.listFiles { f -> f.isDirectory }?.forEach { author ->
+                    author.listFiles { f -> f.isDirectory }?.forEach { bookDir ->
+                        if (bookDir.listFiles()?.any { it.extension == "txt" } == true) {
+                            val id = com.lagradost.quicknovel.BookDownloader2Helper
+                                .generateId(api.name, author.name, bookDir.name).toString()
+                            idToName.putIfAbsent(id, bookDir.name)
+                        }
+                    }
+                }
+            }
+        }
+        fun nameOfBookId(bookId: String): String? = idToName[bookId.removePrefix("b")]
+        fun nameOfKey(key: String): String? = idToName[key.substringBefore("|")]
+
         val ttsCache = TtsAudioCache.allVoices(ctx).take(300).map { v ->
-            mapOf("book" to v.bookId, "model" to v.modelId, "sid" to v.sid,
+            mapOf("book" to v.bookId, "name" to nameOfBookId(v.bookId), "model" to v.modelId, "sid" to v.sid,
                   "chapters_done" to v.chaptersDone, "total" to v.chaptersDone, "bytes" to v.bytes)
         }
         val pregen = TtsPregenManager.pregenProgress.let { synchronized(it) { HashMap(it) } }
             .filter { it.value.state.name in setOf("IsDownloading", "IsPending", "IsPaused") }
-            .map { (k, p) -> mapOf("key" to k, "state" to p.state.name, "done" to p.downloaded, "total" to p.total) }
+            .map { (k, p) -> mapOf("key" to k, "name" to nameOfKey(k), "state" to p.state.name,
+                                   "done" to p.downloaded, "total" to p.total) }
         val remote = RemoteTtsManager.remoteProgressSnapshot()
-            .map { mapOf("key" to it.key, "job_id" to it.jobId, "status" to it.status,
-                         "done" to it.done, "total" to it.total) }
+            .map { mapOf("key" to it.key, "name" to nameOfKey(it.key), "job_id" to it.jobId,
+                         "status" to it.status, "done" to it.done, "total" to it.total) }
         val fixes = LlmFixManager.progress.let { synchronized(it) { HashMap(it) } }
             .filter { it.value.state.name in setOf("IsDownloading", "IsPending", "IsPaused") }
-            .map { (k, p) -> mapOf("key" to k, "state" to p.state.name, "done" to p.downloaded, "total" to p.total) }
+            .map { (k, p) -> mapOf("key" to k, "name" to nameOfKey(k), "state" to p.state.name,
+                                   "done" to p.downloaded, "total" to p.total) }
 
         return DataStore.mapper.writeValueAsString(
             mapOf(
