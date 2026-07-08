@@ -99,5 +99,43 @@ class Config:
                 return m.get("litellm")
         return model_id  # allow passing a raw litellm string too
 
+    # ---- cloud (OpenCode) routing ----
+    def model_entry(self, model_id) -> dict | None:
+        for m in self.models:
+            if m.get("id") == model_id:
+                return m
+        return None
+
+    def is_cloud(self, model_id) -> bool:
+        return (self.model_entry(model_id) or {}).get("kind") == "cloud"
+
+    @property
+    def opencode(self) -> dict:
+        return self.get("opencode", {}) or {}
+
+    def api_base_for(self, model_id) -> str | None:
+        entry = self.model_entry(model_id) or {}
+        return entry.get("api_base") or (self.opencode.get("api_base") if entry.get("kind") == "cloud" else None)
+
+    def api_key_for(self, model_id) -> str | None:
+        entry = self.model_entry(model_id) or {}
+        env = entry.get("api_key_env") or self.opencode.get("api_key_env") or ""
+        return os.environ.get(env) or None if env else None
+
+    def task_model(self, task: str) -> dict:
+        """{"model": id, "fallback": id|None} for a routing task; default_model when unconfigured."""
+        t = (self.get("tasks", {}) or {}).get(task) or {}
+        return {"model": t.get("model") or self.default_model, "fallback": t.get("fallback")}
+
+    @property
+    def cloud_budget(self) -> dict:
+        b = self.get("cloud_budget", {}) or {}
+        return {
+            "daily_usd_cap": float(b.get("daily_usd_cap", 0.0)),
+            "on_cap": b.get("on_cap", "fallback"),
+            "cooldown_s": int(b.get("cooldown_s", 600)),
+            "quota_cooldown_s": int(b.get("quota_cooldown_s", 1800)),
+        }
+
 
 config = Config()

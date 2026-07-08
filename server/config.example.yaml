@@ -27,8 +27,45 @@ temperature: 0.4
 frequency_penalty: 0.3
 presence_penalty: 0.1
 
+# ---- Cloud (OpenCode Zen, OpenAI-compatible) ----
+# Key goes in server/.env as OPENCODE_API_KEY=... (untracked); compose interpolates it.
+opencode:
+  api_base: "https://opencode.ai/zen/go/v1"
+  api_key_env: "OPENCODE_API_KEY"
+
+# Per-task model routing: which model handles which job kind, with a local fallback used when the
+# cloud is unreachable / key missing / budget cap hit. Explicit `model` in a request overrides.
+tasks:
+  grammar_fix:        { model: "oc-glm-5.2",   fallback: "gemma2-2b" }
+  performance_script: { model: "oc-deepseek-v4-flash", fallback: "gemma2-2b" }
+  character_summary:  { model: "oc-glm-5.2",        fallback: "oc-deepseek-v4-flash" }
+
+# Daily cloud spend guardrail (approximate: token counts x configured prices; models without prices
+# count $0 and rely on the provider's own quota/429 -> fallback).
+cloud_budget:
+  daily_usd_cap: 2.00
+  on_cap: fallback         # fallback | reject
+  cooldown_s: 600          # circuit-breaker after cloud errors
+  quota_cooldown_s: 1800   # longer back-off on 429/quota
+
 # Models offered to the app (GET /models). `litellm` is the LiteLLM model string.
+# kind: local (Ollama) | cloud (OpenAI-compatible; needs api_key_env).
+# NOTE (measured with the real grammar prompt, July 2026): glm-5.2 4.2s, minimax-m2.7 7.0s,
+# deepseek-v4-flash 8.6s — all excellent. AVOID reasoning models for prose (qwen3.7-plus burns
+# minutes "thinking" and times out); kimi-k2.7-code 400s on prose params.
 models:
+  - id: "oc-glm-5.2"
+    name: "GLM 5.2 (OpenCode · cloud)"
+    litellm: "openai/glm-5.2"
+    kind: "cloud"
+  - id: "oc-deepseek-v4-flash"
+    name: "DeepSeek V4 Flash (OpenCode · cloud)"
+    litellm: "openai/deepseek-v4-flash"
+    kind: "cloud"
+  - id: "oc-minimax-m2.7"
+    name: "MiniMax M2.7 (OpenCode · cloud)"
+    litellm: "openai/minimax-m2.7"
+    kind: "cloud"
   - id: "qwen2.5-1.5b"
     name: "Qwen2.5 1.5B Instruct (Ollama · fits 4 GB, fast)"
     litellm: "ollama/qwen2.5:1.5b"

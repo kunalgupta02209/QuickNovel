@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from . import history, metrics, tts_engine
 from .config import config
-from .fixer import gpu_busy
+from .fixer import cloud_status, gpu_busy
 from .jobs import jobs
 from .telemetry import telemetry
 from .tts_jobs import sem_stats, tts_jobs
@@ -62,6 +62,7 @@ async def overview():
             "gpu_busy": gpu_busy(),
         },
         "llm": {"jobs": llm_jobs, "rates": metrics.llm_rates()},
+        "cloud": cloud_status(),
         "tts": {
             "jobs": tts_list,
             "rates": metrics.tts_rates(),

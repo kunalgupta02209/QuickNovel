@@ -54,6 +54,7 @@
   <div class="card"><h2>Grammar fixes (LLM)</h2><div class="kv" id="llmkv"></div><div id="llmjobs"></div></div>
   <div class="card"><h2>TTS generation</h2><div class="kv" id="ttskv"></div><div id="ttsjobs"></div></div>
   <div class="card" style="grid-column:1/-1"><h2>Devices</h2><div id="devices"></div></div>
+  <div class="card"><h2>Cloud LLM (OpenCode)</h2><div class="kv" id="cloud"></div></div>
   <div class="card"><h2>Resources</h2><div class="kv" id="res"></div></div>
   <div class="card"><h2>Last 24h</h2><div class="kv" id="hist"></div>
     <div style="margin-top:8px"><a onclick="toggleLogs()">server log tail</a></div></div>
@@ -149,6 +150,16 @@ async function refresh() {
   $('ttsjobs').innerHTML = jobsTable(o.tts.jobs, '/tts/jobs');
   $('devices').innerHTML = (o.devices && o.devices.length)
     ? o.devices.map(deviceCard).join('') : '<div class="empty">no devices reporting</div>';
+  const c = o.cloud || {};
+  const cp = [];
+  cp.push(['key', c.key_present ? 'set' : 'MISSING']);
+  if (c.today) cp.push(['today', `$${(c.today.usd ?? 0).toFixed(2)} / $${(c.cap_usd ?? 0).toFixed(2)}`],
+                       ['calls', c.today.calls ?? 0], ['tokens', c.today.tokens ?? 0]);
+  if (c.over_cap) cp.push(['budget', 'CAP HIT → local fallback']);
+  if (c.down_until) cp.push(['circuit', `open ${fmtDur(c.down_until - Date.now()/1000)} more`]);
+  Object.entries((c.today || {}).by_task || {}).forEach(([t, v]) =>
+    cp.push([t, `$${v.usd.toFixed(2)} · ${v.calls} calls${v.fallbacks ? ' · ' + v.fallbacks + ' fb' : ''}`]));
+  kv($('cloud'), cp);
   const r = o.resources, pairs = [];
   if (r.proc) pairs.push(['server cpu', r.proc.cpu_percent + '%'], ['rss', fmtMb(r.proc.rss_mb)], ['threads', r.proc.threads]);
   if (r.cgroup && r.cgroup.cpu_percent != null) pairs.push(['container cpu', r.cgroup.cpu_percent + '%']);

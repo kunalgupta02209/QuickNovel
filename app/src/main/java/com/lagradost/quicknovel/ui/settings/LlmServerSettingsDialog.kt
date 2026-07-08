@@ -48,7 +48,7 @@ object LlmServerSettingsDialog {
             b.status.text = activity.getString(R.string.llm_server_connected, ms.size)
             b.modelSpinner.visibility = View.VISIBLE
             b.modelSpinner.adapter = ArrayAdapter(
-                activity, android.R.layout.simple_spinner_dropdown_item, ms.map { it.name }
+                activity, android.R.layout.simple_spinner_dropdown_item, ms.map { it.label }
             )
             val saved = getKey<String>(LLM_FIX_SERVER_MODEL) ?: ""
             b.modelSpinner.setSelection(ms.indexOfFirst { it.id == saved }.coerceAtLeast(0))

@@ -88,7 +88,7 @@ object LlmFixDialog {
                         b.llmServerJobs.visibility = View.VISIBLE
                         b.llmServerModel.visibility = View.VISIBLE
                         val ids = models.map { it.id }
-                        b.llmServerModel.adapter = android.widget.ArrayAdapter(activity, android.R.layout.simple_spinner_dropdown_item, models.map { it.name })
+                        b.llmServerModel.adapter = android.widget.ArrayAdapter(activity, android.R.layout.simple_spinner_dropdown_item, models.map { it.label })
                         val sel = ids.indexOf(viewModel.llmServerModel).coerceAtLeast(0)
                         b.llmServerModel.setSelection(sel)
                         b.llmServerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {

@@ -18,12 +18,18 @@ services:
     environment:
       - LOG_LEVEL=INFO
       - LITELLM_LOG=WARNING
+      # OpenCode Zen key comes from server/.env (untracked); empty = cloud models unavailable.
+      - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
       # Override the config's localhost so the CONTAINER reaches the host's Ollama.
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       # If you run the optional ollama service below, point at it instead:
       # - OLLAMA_BASE_URL=http://ollama:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"  # so the container can reach a host-run Ollama
+    # Watch ONLY app/ for reload: watching the whole bind mount made every logs/data write trigger
+    # a watchfiles detection, which wrote a log line, which triggered another detection (4s loop).
+    # config.yaml + prompt .md hot-reload is our own awatch() in main.py, unaffected.
+    command: ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
     restart: unless-stopped
 
   # Optional: run Ollama (GPU) in-compose instead of on the host.

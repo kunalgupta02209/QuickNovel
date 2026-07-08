@@ -73,7 +73,14 @@ def download_apk():
 
 @app.get("/models")
 def models():
-    return {"models": config.models, "default": config.default_model}
+    out = []
+    for m in config.models:
+        kind = m.get("kind") or "local"
+        available = True
+        if kind == "cloud":
+            available = bool(config.api_key_for(m.get("id")))
+        out.append({**m, "kind": kind, "available": available})
+    return {"models": out, "default": config.default_model, "tasks": config.get("tasks", {}) or {}}
 
 
 @app.get("/prompt")

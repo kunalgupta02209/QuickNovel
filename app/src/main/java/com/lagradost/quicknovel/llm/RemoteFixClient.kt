@@ -13,7 +13,16 @@ import java.net.URL
 object RemoteFixClient {
     private val mapper = DataStore.mapper
 
-    data class ServerModel(val id: String = "", val name: String = "")
+    data class ServerModel(
+        val id: String = "",
+        val name: String = "",
+        val kind: String = "local",       // local | cloud
+        val available: Boolean = true,    // cloud without a key -> false
+    ) {
+        val label: String
+            get() = name + (if (kind == "cloud") "  · cloud" else "  · local") +
+                    (if (!available) " (offline)" else "")
+    }
     data class JobSummary(
         val id: String = "",
         val model: String = "",
@@ -42,7 +51,12 @@ object RemoteFixClient {
         val resp = request("GET", "${base(baseUrl)}/models", null) ?: return emptyList()
         return runCatching {
             mapper.readTree(resp).get("models")?.map {
-                ServerModel(it.get("id").asText(), it.get("name")?.asText() ?: it.get("id").asText())
+                ServerModel(
+                    id = it.get("id").asText(),
+                    name = it.get("name")?.asText() ?: it.get("id").asText(),
+                    kind = it.get("kind")?.asText() ?: "local",
+                    available = it.get("available")?.asBoolean() ?: true,
+                )
             } ?: emptyList()
         }.getOrElse { emptyList() }
     }
