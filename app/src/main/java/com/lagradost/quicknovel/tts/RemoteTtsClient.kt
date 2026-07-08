@@ -93,6 +93,12 @@ object RemoteTtsClient {
     fun cancelJob(baseUrl: String, id: String): Boolean =
         request("POST", "${base(baseUrl)}/tts/jobs/$id/cancel", "") != null
 
+    fun pauseJob(baseUrl: String, id: String): Boolean =
+        request("POST", "${base(baseUrl)}/tts/jobs/$id/pause", "") != null
+
+    fun resumeJob(baseUrl: String, id: String): Boolean =
+        request("POST", "${base(baseUrl)}/tts/jobs/$id/resume", "") != null
+
     fun fetchChapterManifest(baseUrl: String, bookId: String, modelId: String, sid: Int, index: Int): Set<String> {
         val resp = request("GET", "${audioBase(baseUrl, bookId, modelId, sid, index)}/manifest", null) ?: return emptySet()
         return runCatching {

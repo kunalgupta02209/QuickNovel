@@ -104,12 +104,22 @@ object LlmFixDialog {
         b.llmServerUrl.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) loadServerModels() }
         b.llmServerJobs.setOnClickListener { ServerJobsDialog.show(activity, viewModel.llmServerUrl) }
 
-        // ---- fixed / original toggle (only if a fix exists for the current chapter) ----
+        // ---- original / grammar / performance display toggle ----
         val idx = viewModel.currentIndex
         if (idx != Int.MIN_VALUE && viewModel.hasFixedChapter(activity, idx)) {
             b.llmToggleRow.visibility = View.VISIBLE
-            b.llmToggleFixed.setOnClickListener { viewModel.llmShowFixed = true; dialog.dismiss() }
-            b.llmToggleOriginal.setOnClickListener { viewModel.llmShowFixed = false; dialog.dismiss() }
+            b.llmToggleFixed.setOnClickListener { viewModel.llmScriptMode = 1; dialog.dismiss() }
+            b.llmToggleOriginal.setOnClickListener { viewModel.llmScriptMode = 0; dialog.dismiss() }
+            b.llmTogglePerformance.setOnClickListener { viewModel.llmScriptMode = 2; dialog.dismiss() }
+        }
+
+        // Which script the generate buttons produce.
+        b.llmScriptPerformance.isChecked =
+            viewModel.llmGenerateScript == com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
+        b.llmScriptPerformance.setOnCheckedChangeListener { _, on ->
+            viewModel.llmGenerateScript =
+                if (on) com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
+                else com.lagradost.quicknovel.llm.ScriptType.GRAMMAR
         }
 
         // ---- persist prompt + prev-count, bumping promptVersion when the prompt actually changed ----

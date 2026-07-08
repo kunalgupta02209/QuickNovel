@@ -27,7 +27,39 @@ object TtsChapterLines {
         }
     }
 
-    /** @return the chapter's spoken lines, or null if the chapter isn't downloaded. */
+    /** The generated-script substitution live playback applies (ReadActivityViewModel.maybeFixedText)
+     *  — MUST mirror it exactly or pre-gen/remote audio keys miss the live cache. Reads the prefs
+     *  statically (no ViewModel). */
+    private fun maybeScriptHtml(context: Context, bookId: String?, chapterIndex: Int, rawHtml: String): String {
+        bookId ?: return rawHtml
+        val mode = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_SCRIPT_MODE, Int::class.javaObjectType
+            )
+        }.getOrNull().takeIf { it != null && it >= 0 } ?: runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_SHOW_FIXED, Boolean::class.javaObjectType
+            )
+        }.getOrNull().let { if (it == true) 1 else 0 }
+        val script = com.lagradost.quicknovel.llm.ScriptType.fromReaderMode(mode) ?: return rawHtml
+        val model = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_MODEL, String::class.java
+            )
+        }.getOrNull() ?: "qwen2.5-1.5b"
+        val ver = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_PROMPT_VERSION, Int::class.javaObjectType
+            )
+        }.getOrNull() ?: 1
+        val fixed = com.lagradost.quicknovel.llm.FixedTextCache
+            .load(context, bookId, model, ver, chapterIndex, script) ?: return rawHtml
+        return fixed.split(Regex("\n{2,}")).filter { it.isNotBlank() }
+            .joinToString("\n") { "<p>" + it.trim().replace("\n", " ") + "</p>" }
+    }
+
+    /** @return the chapter's spoken lines, or null if the chapter isn't downloaded. [bookId] enables
+     *  the script-mode substitution (pass it from synth/pre-gen callers; null = raw text). */
     fun build(
         context: Context,
         apiName: String,
@@ -35,9 +67,11 @@ object TtsChapterLines {
         name: String,
         chapterIndex: Int,
         authorNotes: Boolean,
+        bookId: String? = null,
     ): List<TTSHelper.TTSLine>? {
         val loaded = context.readDownloadedChapter(apiName, author, name, chapterIndex) ?: return null
-        val rawText = TTSHelper.preParseHtml(loaded.html, authorNotes)
+        val html = maybeScriptHtml(context, bookId, chapterIndex, loaded.html)
+        val rawText = TTSHelper.preParseHtml(html, authorNotes)
         val rendered = TTSHelper.render(rawText, markwon(context))
         val lines = TTSHelper.ttsParseText(rendered.substring(0, rendered.length), chapterIndex)
         val spokenTitle = loaded.title.trim()

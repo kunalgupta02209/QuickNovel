@@ -54,7 +54,24 @@
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:text="@string/llm_show_fixed" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/llm_toggle_performance"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="@string/llm_show_performance" />
         </LinearLayout>
+
+        <!-- Which script the generate buttons produce -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/llm_script_performance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/llm_generate_performance"
+            android:textColor="?attr/textColor" />
 
         <!-- Model row -->
         <TextView

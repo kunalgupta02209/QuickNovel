@@ -59,6 +59,12 @@
             android:foregroundServiceType="dataSync" />
 
         <service
+            android:name=".RemoteTtsNotificationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
             android:name=".LlmFixNotificationService"
             android:enabled="true"
             android:exported="false"

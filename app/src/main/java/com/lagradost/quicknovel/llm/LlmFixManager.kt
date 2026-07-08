@@ -42,8 +42,11 @@ object LlmFixManager {
         val graphOnly: Boolean = false, // true = extract characters/setting only (no text rewrite)
         val serverUrl: String = "",     // non-blank -> offload rewriting to the GPU fix server
         val serverModel: String = "",
+        val scriptType: ScriptType = ScriptType.GRAMMAR,
     ) {
-        val key: String get() = "$bookId|$modelId|$promptVersion${if (graphOnly) "|g" else ""}"
+        // grammar keys stay byte-compatible with pre-script records; performance gets its own key
+        val key: String get() = "$bookId|$modelId|$promptVersion" +
+                (if (graphOnly) "|g" else "") + (if (scriptType == ScriptType.PERFORMANCE) "|perf" else "")
         val notifId: Int get() = key.hashCode() xor 0x99150000.toInt()
         val bookIdStr: String get() = "b$bookId"
     }
@@ -153,7 +156,7 @@ object LlmFixManager {
         val items = ArrayList<RemoteFixClient.BatchItem>()
         var alreadyFixed = 0
         for (index in req.rangeStart..req.rangeEnd) {
-            if (FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index)) {
+            if (FixedTextCache.isFixed(ctx, req.bookIdStr, req.modelId, req.promptVersion, index, req.scriptType)) {
                 alreadyFixed++; continue
             }
             val raw = readRawChapter(ctx, req, index, authorNotes) ?: continue
@@ -169,7 +172,8 @@ object LlmFixManager {
         val existing = synchronized(lock) { records[key]?.serverJobId }?.takeIf { it.isNotBlank() }
         val resume = existing != null &&
             RemoteFixClient.getJob(req.serverUrl, existing)?.status?.let { it == "running" || it == "queued" } == true
-        val jobId = if (resume) existing else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items)
+        val jobId = if (resume) existing
+        else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items, req.scriptType.apiValue)
         if (jobId.isNullOrBlank()) return DownloadState.IsFailed to alreadyFixed
         if (!resume) {
             // Intimate the user that work moved off-device and where to watch it.
@@ -180,16 +184,47 @@ object LlmFixManager {
 
         val fetched = HashSet<String>()
         while (true) {
-            if (peekStop(key)) {
-                RemoteFixClient.cancelJob(req.serverUrl, jobId)
-                return DownloadState.IsStopped to (alreadyFixed + fetched.size)
+            when (consumeAction(key)) {
+                DownloadActionType.Stop -> {
+                    RemoteFixClient.cancelJob(req.serverUrl, jobId)
+                    return DownloadState.IsStopped to (alreadyFixed + fetched.size)
+                }
+                DownloadActionType.Pause -> {
+                    // Pause the SERVER job too (it stops burning cloud quota), then idle until resumed.
+                    RemoteFixClient.pauseJob(req.serverUrl, jobId)
+                    emit(ctx, req, DownloadState.IsPaused, alreadyFixed + fetched.size, total)
+                    pauseWait@ while (true) {
+                        delay(500)
+                        when (consumeAction(key)) {
+                            DownloadActionType.Resume -> {
+                                RemoteFixClient.resumeJob(req.serverUrl, jobId)
+                                emit(ctx, req, DownloadState.IsDownloading, alreadyFixed + fetched.size, total)
+                                break@pauseWait
+                            }
+                            DownloadActionType.Stop -> {
+                                RemoteFixClient.cancelJob(req.serverUrl, jobId)
+                                return DownloadState.IsStopped to (alreadyFixed + fetched.size)
+                            }
+                            else -> {}
+                        }
+                    }
+                }
+                else -> {}
             }
             val job = RemoteFixClient.getJob(req.serverUrl, jobId)
                 ?: return DownloadState.IsFailed to (alreadyFixed + fetched.size)
             for (r in job.results) {
                 if (r.fixed.isNotBlank() && fetched.add(r.id)) {
                     r.id.toIntOrNull()?.let { idx ->
-                        FixedTextCache.save(ctx, req.bookIdStr, req.modelId, req.promptVersion, idx, r.fixed)
+                        FixedTextCache.save(
+                            ctx, req.bookIdStr, req.modelId, req.promptVersion, idx, r.fixed, req.scriptType
+                        )
+                        // performance jobs also carry the cue-span ScriptDoc
+                        r.paragraphsJson?.let { pj ->
+                            FixedTextCache.saveDoc(
+                                ctx, req.bookIdStr, req.modelId, req.promptVersion, idx, req.scriptType, pj
+                            )
+                        }
                     }
                     emit(ctx, req, DownloadState.IsDownloading, alreadyFixed + fetched.size, total)
                 }

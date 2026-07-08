@@ -58,7 +58,8 @@ const val LLM_FIX_MODEL: String = "llm_fix_model"                 // String: mod
 const val LLM_FIX_SYSTEM_PROMPT: String = "llm_fix_system_prompt" // String: editable system prompt ("" = built-in default)
 const val LLM_FIX_PROMPT_VERSION: String = "llm_fix_prompt_version" // Int: bumped on prompt edit; part of the fixed-text cache key
 const val LLM_FIX_PREV_CHAPTERS: String = "llm_fix_prev_chapters" // Int: previous chapters given as context (0..3)
-const val LLM_FIX_SHOW_FIXED: String = "llm_fix_show_fixed"       // Boolean: reader shows fixed text vs original
+const val LLM_FIX_SHOW_FIXED: String = "llm_fix_show_fixed"       // Boolean: LEGACY (seed for script mode)
+const val LLM_FIX_SCRIPT_MODE: String = "llm_fix_script_mode"     // Int: 0=original 1=grammar 2=performance (-1 unseeded)
 const val LLM_FIX_FOLDER: String = "llm_fix_pregen"              // background-fix job records, sub-keyed like TTS_PREGEN_FOLDER
 const val LLM_FIX_SERVER_URL: String = "llm_fix_server_url"     // String: GPU fix server base URL ("" = on-device)
 const val LLM_FIX_SERVER_MODEL: String = "llm_fix_server_model" // String: server model id ("" = server default)

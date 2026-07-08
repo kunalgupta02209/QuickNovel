@@ -76,7 +76,7 @@ object RemoteFixClient {
         }.getOrElse { emptyList() }
     }
 
-    data class JobResult(val id: String = "", val fixed: String = "")
+    data class JobResult(val id: String = "", val fixed: String = "", val paragraphsJson: String? = null)
     data class JobDetail(
         val id: String = "",
         val status: String = "",
@@ -97,11 +97,22 @@ object RemoteFixClient {
                 total = n.get("total")?.asInt() ?: 0,
                 error = n.get("error")?.takeIf { !it.isNull }?.asText(),
                 results = n.get("results")?.map {
-                    JobResult(it.get("id").asText(), it.get("fixed")?.asText() ?: "")
+                    JobResult(
+                        id = it.get("id").asText(),
+                        fixed = it.get("fixed")?.asText() ?: "",
+                        // performance jobs carry per-paragraph cue spans; keep raw JSON for the cache
+                        paragraphsJson = it.get("paragraphs")?.takeIf { p -> !p.isNull }?.toString(),
+                    )
                 } ?: emptyList(),
             )
         }.getOrNull()
     }
+
+    fun pauseJob(baseUrl: String, id: String): Boolean =
+        request("POST", "${base(baseUrl)}/jobs/$id/pause", "") != null
+
+    fun resumeJob(baseUrl: String, id: String): Boolean =
+        request("POST", "${base(baseUrl)}/jobs/$id/resume", "") != null
 
     data class BatchItem(
         val id: String,
@@ -110,10 +121,14 @@ object RemoteFixClient {
         val characterMemory: String = "",
     )
 
-    fun submitBatch(baseUrl: String, model: String?, items: List<BatchItem>): String? {
+    fun submitBatch(
+        baseUrl: String, model: String?, items: List<BatchItem>,
+        scriptType: String = "grammar",
+    ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "model" to model?.ifBlank { null },
+                "script_type" to scriptType,
                 "items" to items.map {
                     mapOf(
                         "id" to it.id,

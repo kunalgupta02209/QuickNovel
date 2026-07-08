@@ -112,7 +112,7 @@ class TtsChapterSynthesizer(
         awaitResume: () -> Unit = {},
     ): Int {
         if (tts == null) return -1
-        val lines = TtsChapterLines.build(context, apiName, author, name, chapterIndex, authorNotes) ?: return 0
+        val lines = TtsChapterLines.build(context, apiName, author, name, chapterIndex, authorNotes, bookId) ?: return 0
         return synthLines(lines, shouldStop, awaitResume, onProgress).also {
             if (it >= 0) TtsAudioCache.markChapterDone(context, bookId, def.id, sid, chapterIndex)
         }

@@ -40,6 +40,19 @@ object RemoteTtsManager {
     private val lock = Any()
     private val currentJobs = HashSet<String>()
     private val stopRequested = HashSet<String>()
+    private val pendingAction = HashMap<String, com.lagradost.quicknovel.DownloadActionType>()
+
+    /** Notification action buttons (pause/resume/stop) land here, keyed like the job. */
+    fun addPendingAction(key: String, action: com.lagradost.quicknovel.DownloadActionType) {
+        synchronized(lock) {
+            if (!currentJobs.contains(key)) return
+            if (action == com.lagradost.quicknovel.DownloadActionType.Stop) stopRequested.add(key)
+            pendingAction[key] = action
+        }
+    }
+
+    private fun consumeAction(key: String): com.lagradost.quicknovel.DownloadActionType? =
+        synchronized(lock) { pendingAction.remove(key) }
 
     /** Live progress of a remote (server) TTS job — telemetry/dashboard visibility. */
     data class RemoteProgress(
@@ -189,7 +202,7 @@ object RemoteTtsManager {
             for (index in req.rangeStart..req.rangeEnd) {
                 if (shouldStop(key)) return
                 if (TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) { alreadyDone++; continue }
-                val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes) ?: continue
+                val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes, bookIdStr) ?: continue
                 val sentences = lines
                     .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
                     .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
@@ -227,6 +240,29 @@ object RemoteTtsManager {
                 if (shouldStop(key)) {
                     lastStatus = "stopped"
                     RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                }
+                if (consumeAction(key) == com.lagradost.quicknovel.DownloadActionType.Pause) {
+                    // Pause the SERVER job too (stops burning its CPU), then idle until resume/stop.
+                    RemoteTtsClient.pauseJob(req.serverUrl, jobId)
+                    emitProgress(RemoteProgress(key, "paused", jobId, alreadyDone + fetched.size, total))
+                    pauseWait@ while (true) {
+                        delay(500)
+                        when (consumeAction(key)) {
+                            com.lagradost.quicknovel.DownloadActionType.Resume -> {
+                                RemoteTtsClient.resumeJob(req.serverUrl, jobId)
+                                emitProgress(RemoteProgress(key, "polling", jobId, alreadyDone + fetched.size, total))
+                                break@pauseWait
+                            }
+                            com.lagradost.quicknovel.DownloadActionType.Stop -> {
+                                lastStatus = "stopped"
+                                RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                            }
+                            else -> if (shouldStop(key)) {
+                                lastStatus = "stopped"
+                                RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                            }
+                        }
+                    }
                 }
                 val job = RemoteTtsClient.getJob(req.serverUrl, jobId)
                 if (job == null) {

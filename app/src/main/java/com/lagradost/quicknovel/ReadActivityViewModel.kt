@@ -2163,13 +2163,27 @@ class ReadActivityViewModel : ViewModel() {
     var llmServerModel by PreferenceDelegate(LLM_FIX_SERVER_MODEL, "", String::class)
 
     private var llmShowFixedKey by PreferenceDelegate(LLM_FIX_SHOW_FIXED, false, Boolean::class)
-    /** Whether the reader currently substitutes LLM-fixed text for the original. Toggling reloads. */
-    var llmShowFixed: Boolean
-        get() = llmShowFixedKey
+    private var llmScriptModeKey by PreferenceDelegate(LLM_FIX_SCRIPT_MODE, -1, Int::class)
+
+    /** Which script the GENERATE buttons produce (session-scoped; display mode is llmScriptMode). */
+    var llmGenerateScript: com.lagradost.quicknovel.llm.ScriptType =
+        com.lagradost.quicknovel.llm.ScriptType.GRAMMAR
+
+    /** Reader script mode: 0=original, 1=grammar-fixed, 2=performance script. Seeded once from the
+     *  legacy show-fixed boolean. Switching reloads the chapters (and what TTS speaks). */
+    var llmScriptMode: Int
+        get() = llmScriptModeKey.takeIf { it >= 0 } ?: (if (llmShowFixedKey) 1 else 0)
         set(value) {
-            if (value == llmShowFixedKey) return
-            llmShowFixedKey = value
+            if (value == llmScriptMode) return
+            llmScriptModeKey = value.coerceIn(0, 2)
             refreshChapters()
+        }
+
+    /** LEGACY compat for existing UI: "show fixed" == any generated script selected. */
+    var llmShowFixed: Boolean
+        get() = llmScriptMode != 0
+        set(value) {
+            llmScriptMode = if (value) 1 else 0
         }
 
     /** Kick off a BACKGROUND (WorkManager) model download so it survives the reader being closed. */
@@ -2185,12 +2199,13 @@ class ReadActivityViewModel : ViewModel() {
         return com.lagradost.quicknovel.llm.FixedTextCache.isFixed(context, id, llmModel, llmPromptVersion, index)
     }
 
-    /** Substitute LLM-fixed text for the raw chapter body when the user has "show fixed" on. */
+    /** Substitute the selected generated script (grammar or performance) for the raw chapter body. */
     private fun maybeFixedText(context: Context?, index: Int, raw: String): String {
-        if (!llmShowFixedKey || context == null) return raw
+        val script = com.lagradost.quicknovel.llm.ScriptType.fromReaderMode(llmScriptMode) ?: return raw
+        if (context == null) return raw
         val id = llmBookId() ?: return raw
-        val fixed = com.lagradost.quicknovel.llm.FixedTextCache.load(context, id, llmModel, llmPromptVersion, index)
-            ?: return raw
+        val fixed = com.lagradost.quicknovel.llm.FixedTextCache
+            .load(context, id, llmModel, llmPromptVersion, index, script) ?: return raw
         // The fixer emits plain text with blank-line paragraphs; wrap them as <p> so the reader's HTML
         // pipeline (preParseHtml -> markwon) keeps paragraph breaks like the original chapter.
         return fixed.split(Regex("\n{2,}")).filter { it.isNotBlank() }

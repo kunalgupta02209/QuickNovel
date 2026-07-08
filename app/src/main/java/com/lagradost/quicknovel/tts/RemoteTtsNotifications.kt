@@ -41,7 +41,21 @@ object RemoteTtsNotifications {
             .setContentText(if (finished) "Cloud audio ready" else "Generating on server  $done / $total")
             .setOngoing(!finished)
             .setAutoCancel(finished)
-        if (!finished) builder.setProgress(total.coerceAtLeast(1), done, false)
+        if (!finished) {
+            builder.setProgress(total.coerceAtLeast(1), done, false)
+            // pause/resume/stop route through RemoteTtsNotificationService -> addPendingAction
+            listOf("pause" to "Pause", "resume" to "Resume", "stop" to "Stop").forEachIndexed { i, (type, label) ->
+                val intent = android.content.Intent(context, com.lagradost.quicknovel.RemoteTtsNotificationService::class.java)
+                    .putExtra("type", type)
+                    .putExtra("key", req.key)
+                val pending = android.app.PendingIntent.getService(
+                    context, req.notifId + 1 + i, intent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                            (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) android.app.PendingIntent.FLAG_MUTABLE else 0)
+                )
+                builder.addAction(0, label, pending)
+            }
+        }
         return builder.build()
     }
 
