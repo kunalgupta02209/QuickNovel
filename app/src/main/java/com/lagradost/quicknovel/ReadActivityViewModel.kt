@@ -613,7 +613,16 @@ class ReadActivityViewModel : ViewModel() {
     //     MutableLiveData<String>(null)
     // val textFont: LiveData<String> = _textFont
 
+    private var lastVisibilitySwitchMs = 0L
+
     fun switchVisibility() {
+        // Debounce: one physical tap must flip the chrome exactly ONCE. A tap on the reader can reach
+        // two handlers (the RecyclerView item-touch listener AND a parent container's click when the
+        // list doesn't consume the touch), which double-toggled — bars slid out and straight back in
+        // ("system bars go away and come back", app bars appear to do nothing).
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastVisibilitySwitchMs < 300) return
+        lastVisibilitySwitchMs = now
         // Main-thread setValue (not postValue) so the tap toggles the chrome on this frame, no delay.
         _bottomVisibility.value = !(_bottomVisibility.value ?: false)
     }
