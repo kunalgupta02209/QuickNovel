@@ -268,6 +268,11 @@
     <string name="llm_save_close">Save &amp; close</string>
     <string name="telemetry_report">Report device status to the server dashboard</string>
     <string name="tts_cached_chapters">Cached audio (✓ ready · ◐ partial)</string>
+    <string name="server_update_key">server_update</string>
+    <string name="server_update">Update app from server</string>
+    <string name="server_update_desc">Download and install the latest APK staged on your AI server (over Tailscale/LAN)</string>
+    <string name="server_update_no_url">Set the AI server URL first (AI text-fixer server settings)</string>
+    <string name="server_update_failed">Update download failed — is the server reachable?</string>
     <string name="llm_server_connecting">Connecting…</string>
     <string name="llm_server_enter_url">Enter a server URL</string>
     <string name="llm_test_running">Running test rewrite…</string>

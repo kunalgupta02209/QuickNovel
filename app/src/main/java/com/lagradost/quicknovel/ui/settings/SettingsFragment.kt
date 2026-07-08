@@ -313,6 +313,28 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return@setOnPreferenceClickListener true
         }
 
+        // Self-update from the AI server's staged APK (GET /download/apk over Tailscale/LAN).
+        findPreference<Preference>(getString(R.string.server_update_key))?.setOnPreferenceClickListener {
+            val serverUrl = com.lagradost.quicknovel.BaseApplication.getKey<String>(
+                com.lagradost.quicknovel.LLM_FIX_SERVER_URL
+            ) ?: ""
+            if (serverUrl.isBlank()) {
+                showToast(R.string.server_update_no_url, Toast.LENGTH_LONG)
+            } else {
+                ioSafe {
+                    if (true != activity?.let {
+                            com.lagradost.quicknovel.util.InAppUpdater.Companion.run {
+                                it.updateFromServer(serverUrl)
+                            }
+                        }
+                    ) {
+                        showToast(R.string.server_update_failed, Toast.LENGTH_LONG)
+                    }
+                }
+            }
+            return@setOnPreferenceClickListener true
+        }
+
         providerLangPreference.setOnPreferenceClickListener {
             val settingsManager = PreferenceManager.getDefaultSharedPreferences(it.context)
 

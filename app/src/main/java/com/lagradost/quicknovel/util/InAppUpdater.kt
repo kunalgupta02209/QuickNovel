@@ -126,6 +126,11 @@ class InAppUpdater {
             }
         }
 
+        /** Self-update from the configured fix server (GET /download/apk over the tailnet/LAN):
+         *  downloads the staged APK and hands it to the package installer. Blocking — call from IO. */
+        fun Activity.updateFromServer(baseUrl: String): Boolean =
+            downloadUpdate(baseUrl.trim().trimEnd('/') + "/download/apk")
+
         private fun Activity.downloadUpdate(url: String): Boolean {
             if(isDownloadingUpdate) return false
             isDownloadingUpdate = true
