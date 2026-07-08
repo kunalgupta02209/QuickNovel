@@ -173,7 +173,7 @@ object LlmFixManager {
         val resume = existing != null &&
             RemoteFixClient.getJob(req.serverUrl, existing)?.status?.let { it == "running" || it == "queued" } == true
         val jobId = if (resume) existing
-        else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items, req.scriptType.apiValue)
+        else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items, req.scriptType.apiValue, req.bookIdStr)
         if (jobId.isNullOrBlank()) return DownloadState.IsFailed to alreadyFixed
         if (!resume) {
             // Intimate the user that work moved off-device and where to watch it.

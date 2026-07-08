@@ -313,6 +313,46 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return@setOnPreferenceClickListener true
         }
 
+        // Pull a book another device uploaded (server-held chapter texts -> local download layout).
+        findPreference<Preference>("server_book_sync")?.setOnPreferenceClickListener {
+            val serverUrl = com.lagradost.quicknovel.BaseApplication.getKey<String>(
+                com.lagradost.quicknovel.LLM_FIX_SERVER_URL
+            ) ?: ""
+            if (serverUrl.isBlank()) {
+                showToast(R.string.server_update_no_url, Toast.LENGTH_LONG)
+            } else ioSafe {
+                val books = com.lagradost.quicknovel.util.ServerBookSync.listBooks(serverUrl)
+                activity?.runOnUiThread {
+                    if (books.isEmpty()) {
+                        showToast(R.string.server_book_sync_none, Toast.LENGTH_LONG)
+                        return@runOnUiThread
+                    }
+                    val ctx = context ?: return@runOnUiThread
+                    androidx.appcompat.app.AlertDialog.Builder(ctx)
+                        .setTitle(R.string.server_book_sync)
+                        .setItems(
+                            books.map { b ->
+                                "${b.name}  —  ${b.author.ifBlank { "?" }} · ${b.chapters} chapters"
+                            }.toTypedArray()
+                        ) { d, which ->
+                            d.dismiss()
+                            val book = books[which]
+                            ioSafe {
+                                val n = com.lagradost.quicknovel.util.ServerBookSync.import(ctx, serverUrl, book)
+                                showToast(
+                                    if (n > 0) R.string.server_book_sync_done
+                                    else R.string.server_book_sync_failed,
+                                    Toast.LENGTH_LONG,
+                                )
+                            }
+                        }
+                        .setNegativeButton(R.string.cancel) { d, _ -> d.dismiss() }
+                        .show()
+                }
+            }
+            return@setOnPreferenceClickListener true
+        }
+
         // Self-update from the AI server's staged APK (GET /download/apk over Tailscale/LAN).
         findPreference<Preference>(getString(R.string.server_update_key))?.setOnPreferenceClickListener {
             val serverUrl = com.lagradost.quicknovel.BaseApplication.getKey<String>(

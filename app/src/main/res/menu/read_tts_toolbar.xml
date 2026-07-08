@@ -12,4 +12,9 @@
             android:icon="@drawable/ic_auto_fix"
             app:showAsAction="never"
             android:title="@string/llm_fix_title" />
+    <item
+            android:id="@+id/action_char_search"
+            android:icon="@drawable/search_icon"
+            app:showAsAction="never"
+            android:title="@string/char_search_title" />
 </menu>

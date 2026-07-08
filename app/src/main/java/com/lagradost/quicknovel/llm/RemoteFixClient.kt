@@ -36,13 +36,14 @@ object RemoteFixClient {
     /** Synchronous single-chapter fix. Returns null on any failure (caller falls back to on-device). */
     fun fixSnippet(
         baseUrl: String, text: String, model: String?, previousChapters: String, memory: String,
-        scriptType: String = "grammar",
+        scriptType: String = "grammar", bookId: String = "",
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "text" to text,
                 "model" to model?.ifBlank { null },
                 "script_type" to scriptType,
+                "book_id" to bookId,
                 "previous_chapters" to previousChapters,
                 "character_memory" to memory,
             )
@@ -127,12 +128,13 @@ object RemoteFixClient {
 
     fun submitBatch(
         baseUrl: String, model: String?, items: List<BatchItem>,
-        scriptType: String = "grammar",
+        scriptType: String = "grammar", bookId: String = "",
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "model" to model?.ifBlank { null },
                 "script_type" to scriptType,
+                "book_id" to bookId,
                 "items" to items.map {
                     mapOf(
                         "id" to it.id,

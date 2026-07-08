@@ -109,6 +109,65 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     // System nav/status bars are tied to the app chrome (re-coupled). The holders stay VISIBLE so they
     // are always MEASURED — as GONE they had height 0 and translationY couldn't move them, so show/hide
     // silently did nothing until a scroll forced a layout ("only works while scrolling").
+    /** Reader character/world lookup (P3): type a name -> card + previous occurrences/interactions
+     *  from the server character map (spoiler-gated to the current chapter); tap a row to jump. */
+    private fun showCharacterSearchDialog() {
+        val input = android.widget.EditText(this).apply {
+            hint = getString(R.string.char_search_hint)
+            setSingleLine()
+        }
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val wrap = android.widget.FrameLayout(this).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.char_search_title)
+            .setView(wrap)
+            .setNegativeButton(R.string.cancel) { d, _ -> d.dismiss() }
+            .setPositiveButton(android.R.string.search_go) { d, _ ->
+                val q = input.text.toString().trim()
+                d.dismiss()
+                if (q.isEmpty()) return@setPositiveButton
+                viewModel.searchCharacterMap(q) { hits -> showCharacterSearchResults(q, hits) }
+            }
+            .create().show()
+    }
+
+    private fun showCharacterSearchResults(q: String, hits: List<ReadActivityViewModel.CharSearchHit>) {
+        if (hits.isEmpty()) {
+            com.lagradost.quicknovel.CommonActivity.showToast(R.string.char_search_no_results)
+            return
+        }
+        val hit = hits.first()
+        val rows = ArrayList<String>()
+        if (hit.card.isNotBlank()) rows.add(hit.card)
+        hit.rows.forEach { (_, line) -> rows.add(line) }
+        // other matches (e.g. locations alongside a character) appended as extra cards
+        hits.drop(1).forEach { extra ->
+            rows.add("— ${extra.title} —")
+            if (extra.card.isNotBlank()) rows.add(extra.card)
+            extra.rows.forEach { (_, line) -> rows.add(line) }
+        }
+        val jumpTargets = ArrayList<Int?>()
+        jumpTargets.add(null) // the card row
+        hit.rows.forEach { (ch, _) -> jumpTargets.add(ch) }
+        hits.drop(1).forEach { extra ->
+            jumpTargets.add(null)
+            if (extra.card.isNotBlank()) jumpTargets.add(null)
+            extra.rows.forEach { (ch, _) -> jumpTargets.add(ch) }
+        }
+        val adapter = ArrayAdapter<String>(this, R.layout.chapter_select_dialog)
+        adapter.addAll(rows)
+        AlertDialog.Builder(this)
+            .setTitle(hit.title)
+            .setNegativeButton(R.string.cancel) { d, _ -> d.dismiss() }
+            .setAdapter(adapter) { _, which ->
+                jumpTargets.getOrNull(which)?.let { ch -> viewModel.seekToChapter(ch) }
+            }
+            .create().show()
+    }
+
     private fun hideSystemUI() {
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
         slideChrome(binding.readToolbarHolder, shown = false, up = true)
@@ -944,6 +1003,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 when (item.itemId) {
                     R.id.action_tts_settings -> { showTtsSettingsDialog(); true }
                     R.id.action_llm_fix -> { com.lagradost.quicknovel.ui.llm.LlmFixDialog.show(this@ReadActivity2, viewModel); true }
+                    R.id.action_char_search -> { showCharacterSearchDialog(); true }
                     else -> false
                 }
             }

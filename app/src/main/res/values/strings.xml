@@ -417,4 +417,13 @@
     <string name="more_spacing">More Spacing</string>
     <string name="less_spacing">Less Spacing</string>
     <string name="unable_to_inflate">UI was unable to be created correctly, this is a MAJOR BUG and should be reported immediately %s</string>
+    <string name="char_search_title">Character lookup</string>
+    <string name="char_search_hint">Character or place name…</string>
+    <string name="character_map_missing">No character map yet — it builds as chapters sync to the server</string>
+    <string name="char_search_no_results">No matches (map may still be building)</string>
+    <string name="server_book_sync">Sync books from server</string>
+    <string name="server_book_sync_desc">Pull a book another device uploaded (chapters download from your AI server)</string>
+    <string name="server_book_sync_none">No books on the server yet</string>
+    <string name="server_book_sync_done">Book synced — check your Library</string>
+    <string name="server_book_sync_failed">Book sync failed</string>
 </resources>

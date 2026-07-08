@@ -119,6 +119,11 @@
                 app:key="@string/manual_check_update_key"
                 app:icon="@drawable/ic_baseline_system_update_24" />
         <Preference
+                android:title="@string/server_book_sync"
+                android:summary="@string/server_book_sync_desc"
+                app:key="server_book_sync"
+                app:icon="@drawable/ic_baseline_cloud_24" />
+        <Preference
                 android:title="@string/server_update"
                 android:summary="@string/server_update_desc"
                 app:key="@string/server_update_key"

@@ -2261,6 +2261,72 @@ class ReadActivityViewModel : ViewModel() {
         }
     }
 
+    /** One hit of the reader's character/world lookup: a card + tappable occurrences. */
+    data class CharSearchHit(
+        val title: String,
+        val card: String,
+        val rows: List<Pair<Int, String>>, // chapterIndex -> display line (tap = jump)
+    )
+
+    /** Reader character/world search against the server map, spoiler-gated to the current chapter. */
+    fun searchCharacterMap(query: String, onResult: (List<CharSearchHit>) -> Unit) {
+        val url = llmServerUrl
+        if (url.isBlank()) { showToast(R.string.llm_server_enter_url); return }
+        val bookId = llmBookId() ?: return
+        val gate = currentIndex.takeIf { it != Int.MIN_VALUE }
+        ioSafe {
+            val r = com.lagradost.quicknovel.llm.CharMapClient.search(url, bookId, query, gate)
+            if (r == null) {
+                showToast(R.string.character_map_missing)
+                runOnMainThread { onResult(emptyList()) }
+                return@ioSafe
+            }
+            val hits = ArrayList<CharSearchHit>()
+            r.get("characters")?.forEach { c ->
+                val name = c.get("name")?.asText() ?: return@forEach
+                val traits = (c.get("personality")?.map { it.asText() } ?: emptyList()).take(4)
+                val visual = c.get("visual")?.fields()?.asSequence()
+                    ?.mapNotNull { (k, v) -> v.asText().takeIf { it.isNotBlank() }?.let { "$k: $it" } }
+                    ?.toList() ?: emptyList()
+                val card = buildString {
+                    append(c.get("gender")?.asText() ?: "?").append(" · ")
+                    append(c.get("role")?.asText() ?: "?")
+                    c.get("aliases")?.takeIf { it.size() > 0 }
+                        ?.let { al -> append("\naka: ").append(al.joinToString(", ") { a -> a.asText() }) }
+                    if (traits.isNotEmpty()) append("\n").append(traits.joinToString(", "))
+                    if (visual.isNotEmpty()) append("\n").append(visual.joinToString("; "))
+                    (c.get("casting")?.get("voice_name")?.asText())
+                        ?.let { v -> append("\nvoice: ").append(v) }
+                }
+                val rows = ArrayList<Pair<Int, String>>()
+                c.get("interactions")?.forEach { inter ->
+                    val ch = inter.get("chapter")?.asInt() ?: return@forEach
+                    rows.add(
+                        ch to "Ch ${ch + 1}:  ${inter.get("a")?.asText()} ↔ ${inter.get("b")?.asText()} — ${inter.get("summary")?.asText()}"
+                    )
+                }
+                val interactionChapters = rows.map { it.first }.toSet()
+                c.get("occurrences")?.forEach { o ->
+                    val ch = o.asInt()
+                    if (ch !in interactionChapters) rows.add(ch to "Ch ${ch + 1}:  appears")
+                }
+                rows.sortBy { it.first }
+                hits.add(CharSearchHit(name, card, rows))
+            }
+            r.get("locations")?.forEach { lo ->
+                val name = lo.get("name")?.asText() ?: return@forEach
+                val first = lo.get("first_chapter")?.asInt() ?: 0
+                hits.add(
+                    CharSearchHit(
+                        "📍 $name", lo.get("description")?.asText() ?: "",
+                        listOf(first to "Ch ${first + 1}:  first mentioned"),
+                    )
+                )
+            }
+            runOnMainThread { onResult(hits) }
+        }
+    }
+
     private fun llmSupertonic(): Boolean =
         ttsEngineType == TtsEngineType.ON_DEVICE && ttsOnDeviceModel == "supertonic"
 

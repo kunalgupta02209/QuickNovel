@@ -29,6 +29,7 @@ class SnippetReq(BaseModel):
     text: str
     model: str | None = None
     script_type: str = "grammar"  # grammar | performance
+    book_id: str = ""  # enables character-map memory backfill
     previous_chapters: str | None = ""
     character_memory: str | None = ""
 
@@ -114,8 +115,14 @@ def set_store_samples(on: bool):
 @app.post("/fix/snippet")
 async def fix_snippet(req: SnippetReq):
     """Synchronous small-text fix; script_type=performance returns cue-annotated span JSON too."""
+    memory = req.character_memory or ""
+    if not memory and req.book_id:
+        try:
+            memory = charmap.prompt_block(req.book_id)
+        except Exception:  # noqa: BLE001
+            memory = ""
     res = await fix_text(
-        req.text, req.model, req.previous_chapters or "", req.character_memory or "",
+        req.text, req.model, req.previous_chapters or "", memory,
         script_type=req.script_type,
     )
     return {"fixed": res["fixed"], "paragraphs": res.get("paragraphs"), "script_type": req.script_type}

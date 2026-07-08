@@ -52,11 +52,14 @@ object RemoteTtsClient {
         baseUrl: String, bookId: String, modelId: String, sid: Int, sampleRate: Int,
         chapters: List<ChapterReq>, bookName: String = "",
         deviceId: String = "", deviceName: String = "",
+        apiName: String = "", author: String = "",
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
                 "book_id" to bookId,
                 "book_name" to bookName,
+                "api_name" to apiName,
+                "author" to author,
                 "model_id" to modelId,
                 "sid" to sid,
                 "sample_rate" to sampleRate,
