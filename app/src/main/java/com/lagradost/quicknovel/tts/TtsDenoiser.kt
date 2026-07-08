@@ -83,9 +83,13 @@ object TtsDenoiser {
     /** Denoise [pcm] (at [inRate]) and resample the result to [outRate]. Returns [pcm] if unavailable. */
     fun process(ctx: Context, pcm: FloatArray, inRate: Int, outRate: Int): FloatArray {
         if (pcm.size < 16) return pcm
-        val d = ensure(ctx.applicationContext) ?: return pcm
+        val d = ensure(ctx.applicationContext) ?: run {
+            android.util.Log.w("TtsDenoiser", "NOT READY -> passthrough (raw) n=${pcm.size}"); return pcm
+        }
         return try {
             val out = synchronized(lock) { d.run(pcm, inRate) }
+            // A/B diagnostic: out.sampleRate == 16000 proves GTCRN band-limits to 8 kHz (the muffling).
+            android.util.Log.i("TtsDenoiser", "in ${pcm.size}@$inRate -> out ${out.samples.size}@${out.sampleRate} -> resample $outRate")
             resample(out.samples, out.sampleRate, outRate)
         } catch (t: Throwable) {
             logError(t); pcm

@@ -76,8 +76,14 @@ object TtsAudioCache {
     fun chapterDir(ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int): File =
         File(bookDir(ctx, bookId), "$modelId/s$sid/c$chapterIndex")
 
-    fun fileFor(ctx: Context, bookId: String, modelId: String, sid: Int, line: TTSHelper.TTSLine): File =
-        File(chapterDir(ctx, bookId, modelId, sid, line.index), sha1Hex(line.speakOutMsg).take(24) + ".wav")
+    /**
+     * Per-sentence WAV. [variant] distinguishes post-processing that changes the bytes on disk —
+     * "" = raw model output (what the pre-generator/prefetch write, backward-compatible), ".dn1" =
+     * GTCRN-denoised (written only by live playback when the denoiser is on). This makes the denoise
+     * toggle actually affect cached audio instead of silently reusing a raw cache hit.
+     */
+    fun fileFor(ctx: Context, bookId: String, modelId: String, sid: Int, line: TTSHelper.TTSLine, variant: String = ""): File =
+        File(chapterDir(ctx, bookId, modelId, sid, line.index), sha1Hex(line.speakOutMsg).take(24) + variant + ".wav")
 
     private fun sha1Hex(s: String): String =
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))

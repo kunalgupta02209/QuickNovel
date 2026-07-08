@@ -366,8 +366,10 @@ class OnDeviceTtsEngine(
     private fun render(item: Item) {
         val engine = tts ?: run { item.failed = true; return }
 
-        // READ-THROUGH: a cache hit is a ~ms disk read instead of real-time synthesis.
-        val cacheFile = cacheBookId?.let { TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line) }
+        // READ-THROUGH: a cache hit is a ~ms disk read instead of real-time synthesis. The denoise
+        // variant keeps denoised vs raw audio as separate cache entries, so the toggle is honest.
+        val variant = if (denoise) ".dn1" else ""
+        val cacheFile = cacheBookId?.let { TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line, variant) }
         if (cacheFile != null && cacheFile.exists()) {
             val cached = TtsAudioCache.load(cacheFile)
             if (cached != null) {
