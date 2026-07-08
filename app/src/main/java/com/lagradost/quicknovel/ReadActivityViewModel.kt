@@ -1389,6 +1389,7 @@ class ReadActivityViewModel : ViewModel() {
                     engine.cacheBookId = runCatching { TtsAudioCache.bookIdFor(book) }.getOrNull()
                     engine.updateEnhance(ttsEnhance)
                     engine.updateDenoise(ttsDenoise)
+                    engine.updateVoiceStyle(com.lagradost.quicknovel.tts.AudioPostProcessor.VoiceStyle.fromPref(ttsVoiceStyle))
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
                         _ttsPending.postValue(false) // audio started -> stop the flicker
@@ -1953,6 +1954,17 @@ class ReadActivityViewModel : ViewModel() {
             ttsDenoiseKey = value
             (ttsSession as? OnDeviceTtsEngine)?.updateDenoise(value)
             if (value) ensureDenoiserDownloaded()
+        }
+
+    // Voice character: 0=Natural, 1=Warm, 2=Sultry (warmth EQ + pitch/tempo, layered live).
+    private var ttsVoiceStyleKey by PreferenceDelegate(EPUB_TTS_OD_VOICE_STYLE, 0, Int::class)
+    var ttsVoiceStyle: Int
+        get() = ttsVoiceStyleKey
+        set(value) {
+            ttsVoiceStyleKey = value
+            (ttsSession as? OnDeviceTtsEngine)?.updateVoiceStyle(
+                com.lagradost.quicknovel.tts.AudioPostProcessor.VoiceStyle.fromPref(value)
+            )
         }
 
     // Feature 3: auto-pregen all downloaded chapters (multi-threaded) as soon as the book opens.

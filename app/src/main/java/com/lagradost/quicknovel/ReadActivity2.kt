@@ -523,6 +523,16 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsEnhanceSwitch.isChecked = viewModel.ttsEnhance
         b.ttsEnhanceSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsEnhance = on }
 
+        fun refreshStyle() {
+            b.ttsStyleNatural.alpha = if (viewModel.ttsVoiceStyle == 0) 1f else 0.5f
+            b.ttsStyleWarm.alpha = if (viewModel.ttsVoiceStyle == 1) 1f else 0.5f
+            b.ttsStyleSultry.alpha = if (viewModel.ttsVoiceStyle == 2) 1f else 0.5f
+        }
+        b.ttsStyleNatural.setOnClickListener { viewModel.ttsVoiceStyle = 0; refreshStyle() }
+        b.ttsStyleWarm.setOnClickListener { viewModel.ttsVoiceStyle = 1; refreshStyle() }
+        b.ttsStyleSultry.setOnClickListener { viewModel.ttsVoiceStyle = 2; refreshStyle() }
+        refreshStyle()
+
         b.ttsDenoiseSwitch.isChecked = viewModel.ttsDenoise
         b.ttsDenoiseSwitch.setOnCheckedChangeListener { _, on ->
             viewModel.ttsDenoise = on

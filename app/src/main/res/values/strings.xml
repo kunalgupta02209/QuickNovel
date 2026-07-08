@@ -53,6 +53,10 @@
     <string name="tts_prefetch_on_open_desc">When you open a chapter, generate on-device TTS for it and the next chapter so playback and skipping are instant</string>
     <string name="tts_autogen">Auto-generate TTS for the whole book</string>
     <string name="tts_autogen_desc">On opening a book, background-generate TTS (default voice) for every downloaded chapter, using multiple threads</string>
+    <string name="tts_voice_style">Voice style</string>
+    <string name="tts_style_natural">Natural</string>
+    <string name="tts_style_warm">Warm</string>
+    <string name="tts_style_sultry">Sultry</string>
     <string name="exampleTXT">"this is <annotation key="rounded">a regular</annotation> paragraph."</string>
     <string name="tags">Tags</string>
     <string name="views">Views</string>

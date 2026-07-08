@@ -131,6 +131,42 @@
                 android:valueFrom="0"
                 android:valueTo="1000" />
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="@string/tts_voice_style"
+                android:textColor="?attr/textColor"
+                android:textSize="15sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tts_style_natural"
+                    style="@style/BlackButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:text="@string/tts_style_natural" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tts_style_warm"
+                    style="@style/BlackButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:text="@string/tts_style_warm" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tts_style_sultry"
+                    style="@style/BlackButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:text="@string/tts_style_sultry" />
+            </LinearLayout>
+
             <com.google.android.material.switchmaterial.SwitchMaterial
                 android:id="@+id/tts_enhance_switch"
                 android:layout_width="match_parent"

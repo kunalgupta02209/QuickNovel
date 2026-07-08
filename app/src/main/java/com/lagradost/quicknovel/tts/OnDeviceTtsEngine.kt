@@ -56,6 +56,18 @@ class OnDeviceTtsEngine(
     @Volatile var enhanceAudio: Boolean = true
     fun updateEnhance(on: Boolean) { enhanceAudio = on }
 
+    /** Voice character (Natural/Warm/Sultry): a warmth EQ here + a pitch/tempo multiplier on the track. */
+    @Volatile var voiceStyle: AudioPostProcessor.VoiceStyle = AudioPostProcessor.VoiceStyle.NATURAL
+        private set
+    @Volatile private var stylePitch: Float = 1.0f
+    @Volatile private var styleSpeed: Float = 1.0f
+    fun updateVoiceStyle(style: AudioPostProcessor.VoiceStyle) {
+        voiceStyle = style
+        stylePitch = style.stylePitch
+        styleSpeed = style.styleSpeed
+        track?.let { applyParams(it) } // pitch/tempo apply immediately; the EQ applies next sentence
+    }
+
     /** Optional GTCRN neural denoiser (heavier; applied in the producer). Off by default. */
     @Volatile var denoise: Boolean = false
     fun updateDenoise(on: Boolean) { denoise = on }
@@ -239,8 +251,9 @@ class OnDeviceTtsEngine(
     private fun applyParams(t: AudioTrack) {
         runCatching {
             val p = t.playbackParams
-            p.speed = speed.coerceIn(0.25f, 4.0f)
-            p.pitch = pitch.coerceIn(0.25f, 4.0f)
+            // Voice-style pitch/tempo multiplies the user's manual pref (Natural = x1 => pref intact).
+            p.speed = (speed * styleSpeed).coerceIn(0.25f, 4.0f)
+            p.pitch = (pitch * stylePitch).coerceIn(0.25f, 4.0f)
             t.playbackParams = p
         }
     }
@@ -418,7 +431,14 @@ class OnDeviceTtsEngine(
             }
             if (!running) return
             // Clean up the raw model audio (de-clip / de-ess / normalize) right before playback.
-            val pcm = item.pcm?.let { if (enhanceAudio) AudioPostProcessor.process(it, sampleRate) else it }
+            // Run the post-processor when enhancing OR when a non-Natural style needs its warmth EQ
+            // (the style path also applies the normalize/soft-clip safety around the low-shelf boost).
+            val style = voiceStyle
+            val pcm = item.pcm?.let {
+                if (enhanceAudio || style != AudioPostProcessor.VoiceStyle.NATURAL)
+                    AudioPostProcessor.process(it, sampleRate, style)
+                else it
+            }
             if (!item.cancelled && !item.failed && pcm != null) {
                 val next: TTSHelper.TTSLine? = synchronized(lock) { queue.getOrNull(playPos + 1)?.line }
                 onAudibleLine?.invoke(item.line, next) // highlight + notification, audio-synced

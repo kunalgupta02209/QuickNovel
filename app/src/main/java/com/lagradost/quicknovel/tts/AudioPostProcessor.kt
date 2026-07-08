@@ -24,11 +24,32 @@ import kotlin.math.tanh
  */
 object AudioPostProcessor {
 
-    fun process(input: FloatArray, sampleRate: Int): FloatArray {
+    /**
+     * Voice character preset. Bundles the three modulation levers — playback pitch/tempo (applied on
+     * the AudioTrack) plus a warmth EQ (applied here): a low-shelf BOOST for chest/proximity warmth
+     * and a softer top-end. NATURAL reproduces the original chain byte-for-byte (no low-shelf, the
+     * original 6 kHz/-5 dB de-ess), so it is a safe default.
+     */
+    enum class VoiceStyle(
+        val stylePitch: Float, val styleSpeed: Float,
+        val lowShelfHz: Float, val lowShelfDb: Float,
+        val topCutHz: Float, val topCutDb: Float,
+    ) {
+        NATURAL(1.00f, 1.00f, 200f, 0.0f, 6000f, -5f),  // == the original chain (no-op)
+        WARM(0.96f, 0.97f, 200f, +2.5f, 5000f, -6f),
+        SULTRY(0.92f, 0.93f, 220f, +3.5f, 4500f, -7f);
+
+        companion object {
+            fun fromPref(v: Int): VoiceStyle = entries.getOrElse(v) { NATURAL }
+        }
+    }
+
+    fun process(input: FloatArray, sampleRate: Int, style: VoiceStyle = VoiceStyle.NATURAL): FloatArray {
         if (input.size < 8 || sampleRate <= 0) return input
         val x = input.copyOf()
         highPass(x, sampleRate, 80f)
-        highShelf(x, sampleRate, 6000f, -5f)
+        if (style.lowShelfDb != 0f) lowShelf(x, sampleRate, style.lowShelfHz, style.lowShelfDb)
+        highShelf(x, sampleRate, style.topCutHz, style.topCutDb)
         compress(x, sampleRate)
         normalizeAndLimit(x, target = 0.89f, maxGain = 6f)
         return x
@@ -75,6 +96,23 @@ object AudioPostProcessor {
             b2 = (a * ((a + 1) + (a - 1) * cw - 2 * sqrtA * alpha) / a0).toFloat(),
             a1 = (2 * ((a - 1) - (a + 1) * cw) / a0).toFloat(),
             a2 = (((a + 1) - (a - 1) * cw - 2 * sqrtA * alpha) / a0).toFloat(),
+        )
+    }
+
+    private fun lowShelf(x: FloatArray, fs: Int, fc: Float, gainDb: Float, q: Float = 0.707f) {
+        val a = Math.pow(10.0, gainDb / 40.0)
+        val w0 = 2.0 * Math.PI * fc / fs
+        val cw = cos(w0); val sw = sin(w0)
+        val alpha = sw / 2.0 * sqrt((a + 1 / a) * (1 / q - 1) + 2)
+        val sqrtA = sqrt(a)
+        val a0 = (a + 1) + (a - 1) * cw + 2 * sqrtA * alpha
+        biquad(
+            x,
+            b0 = (a * ((a + 1) - (a - 1) * cw + 2 * sqrtA * alpha) / a0).toFloat(),
+            b1 = (2 * a * ((a - 1) - (a + 1) * cw) / a0).toFloat(),
+            b2 = (a * ((a + 1) - (a - 1) * cw - 2 * sqrtA * alpha) / a0).toFloat(),
+            a1 = (-2 * ((a - 1) + (a + 1) * cw) / a0).toFloat(),
+            a2 = (((a + 1) + (a - 1) * cw - 2 * sqrtA * alpha) / a0).toFloat(),
         )
     }
 
