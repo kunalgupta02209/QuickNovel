@@ -55,6 +55,7 @@
   <div class="card"><h2>Grammar fixes (LLM)</h2><div class="kv" id="llmkv"></div><div id="llmjobs"></div></div>
   <div class="card"><h2>TTS generation</h2><div class="kv" id="ttskv"></div><div id="ttsjobs"></div></div>
   <div class="card" style="grid-column:1/-1"><h2>Devices</h2><div id="devices"></div></div>
+  <div class="card"><h2>Character maps</h2><div id="charmaps"></div></div>
   <div class="card"><h2>Cloud LLM (OpenCode)</h2><div class="kv" id="cloud"></div></div>
   <div class="card"><h2>Resources</h2><div class="kv" id="res"></div></div>
   <div class="card"><h2>Last 24h</h2><div class="kv" id="hist"></div>
@@ -185,8 +186,39 @@ async function refresh() {
     ['avg llm', fmtDur((h.llm||{}).avg_duration_s)], ['avg tts', fmtDur((h.tts||{}).avg_duration_s)],
     ['restarts', h.server_starts ?? 0]]);
 }
+async function charmapAction(path) {
+  await fetch(path, {method:'POST'}).catch(()=>{});
+  refreshCharmaps();
+}
+async function buildMap(bookId) {
+  await fetch('/charmap/build', {method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({book_id: bookId})}).catch(()=>{});
+  refreshCharmaps();
+}
+async function refreshCharmaps() {
+  try {
+    const [maps, books, cjobs] = await Promise.all([
+      (await fetch('/charmap')).json(), (await fetch('/books')).json(),
+      (await fetch('/charmap/jobs')).json()]);
+    const mapped = new Set((maps.maps||[]).map(m => m.book_id));
+    const rows = [];
+    (maps.maps||[]).forEach(m => rows.push(
+      `<tr><td>${esc(m.book_name || m.book_id)}</td>
+       <td>${m.characters} chars · thru ch ${m.through_chapter + 1}</td>
+       <td><button onclick="buildMap('${esc(m.book_id)}')" style="border-color:var(--acc);color:var(--acc)">rebuild</button>
+           <button onclick="charmapAction('/charmap/${esc(m.book_id)}/recast')" style="border-color:var(--warn);color:var(--warn)">recast</button></td></tr>`));
+    (books.books||[]).filter(b => !mapped.has(b.book_id)).forEach(b => rows.push(
+      `<tr><td>${esc(b.book_name)}</td><td style="color:var(--dim)">${b.chapters} ch stored, no map</td>
+       <td><button onclick="buildMap('${esc(b.book_id)}')" style="border-color:var(--ok);color:var(--ok)">build</button></td></tr>`));
+    (cjobs.jobs||[]).filter(j => ['queued','running','paused'].includes(j.status)).forEach(j => rows.push(
+      `<tr><td colspan="2"><span class="pill ${esc(j.status)}">${esc(j.status)}</span> extracting ${j.progress}/${j.total}</td>
+       <td><button onclick="charmapAction('/charmap/jobs/${esc(j.id)}/${j.status==='paused'?'resume':'pause'}')">${j.status==='paused'?'resume':'pause'}</button></td></tr>`));
+    $('charmaps').innerHTML = rows.length ? `<table>${rows.join('')}</table>` : '<div class="empty">no books stored yet</div>';
+  } catch { $('charmaps').innerHTML = '<div class="empty">n/a</div>'; }
+}
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 refresh(); setInterval(refresh, 2000);
+refreshCharmaps(); setInterval(refreshCharmaps, 5000);
 </script>
 </body>
 </html>

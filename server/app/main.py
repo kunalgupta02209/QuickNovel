@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from watchfiles import awatch
 
-from . import dashboard, history, telemetry, tts_engine, tts_storage
+from . import casting, chapter_texts, charmap, dashboard, history, telemetry, tts_engine, tts_storage
+from .charmap_jobs import charmap_jobs
 from .config import CONFIG_PATH, config
 from .fixer import fix_text
 from .jobs import jobs
@@ -42,6 +43,7 @@ class BatchItem(BaseModel):
 class BatchReq(BaseModel):
     model: str | None = None
     script_type: str = "grammar"
+    book_id: str = ""  # enables character-map memory backfill + performance-script casting
     items: list[BatchItem]
 
 
@@ -124,7 +126,7 @@ async def fix_batch(req: BatchReq):
     """Kick off an async batch job over many chapters (point 2)."""
     if not req.items:
         raise HTTPException(400, "no items")
-    job = jobs.submit(req.model, [i.model_dump() for i in req.items], req.script_type)
+    job = jobs.submit(req.model, [i.model_dump() for i in req.items], req.script_type, req.book_id)
     return {"job_id": job.id}
 
 
@@ -181,6 +183,8 @@ class TtsChapter(BaseModel):
 class TtsBatchReq(BaseModel):
     book_id: str
     book_name: str = ""  # human-readable book title (dashboard)
+    api_name: str = ""   # provider identity (book sync between devices)
+    author: str = ""
     model_id: str
     sid: int = 0
     sample_rate: int = 24000
@@ -216,9 +220,16 @@ async def tts_batch(req: TtsBatchReq):
         raise HTTPException(400, f"sid {req.sid} out of range for {req.model_id}")
     if not req.items:
         raise HTTPException(400, "no items")
+    items = [i.model_dump() for i in req.items]
+    # Side effects: persist chapter texts (charmap/search/book-sync source) + delta-build the map.
+    try:
+        chapter_texts.store_batch(req.book_id, req.book_name, items, req.api_name, req.author)
+        charmap_jobs.maybe_auto_build(req.book_id)
+    except Exception:  # noqa: BLE001
+        log.exception("chapter_texts/charmap hook failed")
     job = tts_jobs.submit(
         req.book_id, req.model_id, req.sid, req.sample_rate,
-        [i.model_dump() for i in req.items], config.tts_num_threads, req.book_name,
+        items, config.tts_num_threads, req.book_name,
         req.device_id, req.device_name,
     )
     return {"job_id": job.id}
@@ -281,6 +292,130 @@ def tts_audio_zip(book_id: str, model_id: str, sid: int, index: int):
         raise HTTPException(404, "chapter not ready")
     data = tts_storage.zip_chapter(book_id, model_id, sid, index)
     return Response(content=data, media_type="application/zip")
+
+
+# ---- character maps (P3) ----
+class CharmapBuildReq(BaseModel):
+    book_id: str
+    start: int = 0
+    end: int = -1  # -1 = all stored chapters
+    cast_model: str = "kokoro"
+
+
+@app.post("/charmap/build")
+async def charmap_build(req: CharmapBuildReq):
+    idxs = chapter_texts.chapter_indices(req.book_id)
+    if not idxs:
+        raise HTTPException(404, "no stored chapters for this book (sync it via /tts/batch first)")
+    end = req.end if req.end >= 0 else max(idxs)
+    job = charmap_jobs.submit(req.book_id, req.start, end, req.cast_model)
+    return {"job_id": job.id}
+
+
+@app.get("/charmap")
+def charmap_list():
+    return {"maps": charmap.list_maps()}
+
+
+@app.get("/charmap/jobs")
+def charmap_list_jobs():
+    return {"jobs": charmap_jobs.list()}
+
+
+@app.post("/charmap/jobs/{jid}/cancel")
+def charmap_cancel(jid: str):
+    j = charmap_jobs.cancel(jid) or _404()
+    return j.summary()
+
+
+@app.post("/charmap/jobs/{jid}/pause")
+def charmap_pause(jid: str):
+    j = charmap_jobs.pause(jid) or _404()
+    return j.summary()
+
+
+@app.post("/charmap/jobs/{jid}/resume")
+def charmap_resume(jid: str):
+    j = charmap_jobs.resume(jid) or _404()
+    return j.summary()
+
+
+def _404():
+    raise HTTPException(404, "job not found")
+
+
+@app.get("/charmap/{book_id}")
+def charmap_get(book_id: str, through_chapter: int | None = None):
+    m = charmap.load_map(book_id)
+    if not m:
+        raise HTTPException(404, "no map for this book")
+    if through_chapter is not None:  # spoiler gate: rebuild the view from extractions
+        m = charmap.merge_extractions(book_id, through_chapter)
+        casting.assign(m)
+    return m
+
+
+@app.get("/charmap/{book_id}/search")
+def charmap_search(book_id: str, q: str, through_chapter: int | None = None):
+    """Reader lookup: previous occurrences of a character + how they interacted + world/locations."""
+    if not charmap.load_map(book_id):
+        raise HTTPException(404, "no map for this book")
+    return charmap.search(book_id, q, through_chapter)
+
+
+class CastingPatch(BaseModel):
+    characters: dict[str, dict]  # char id -> partial casting {sid?, model?, pitch?, speed?, locked?}
+
+
+@app.patch("/charmap/{book_id}/casting")
+def charmap_patch_casting(book_id: str, patch: CastingPatch):
+    m = charmap.load_map(book_id)
+    if not m:
+        raise HTTPException(404, "no map for this book")
+    for c in m.get("characters") or []:
+        upd = patch.characters.get(c["id"])
+        if upd:
+            c["casting"] = {**(c.get("casting") or {}), **upd, "locked": upd.get("locked", True)}
+    m.setdefault("casting_meta", {})["cast_version"] = \
+        int((m.get("casting_meta") or {}).get("cast_version", 0)) + 1
+    charmap.save_map(book_id, m)
+    return {"ok": True, "cast_version": m["casting_meta"]["cast_version"]}
+
+
+@app.post("/charmap/{book_id}/recast")
+def charmap_recast(book_id: str, cast_model: str = "kokoro"):
+    m = charmap.load_map(book_id)
+    if not m:
+        raise HTTPException(404, "no map for this book")
+    casting.assign(m, cast_model)
+    charmap.save_map(book_id, m)
+    return {"ok": True, "cast_version": m["casting_meta"]["cast_version"]}
+
+
+# ---- book sync between devices (server-held chapter texts) ----
+@app.get("/books")
+def books_list():
+    return {"books": chapter_texts.list_books()}
+
+
+@app.get("/books/{book_id}/chapters.zip")
+def book_chapters_zip(book_id: str):
+    import io
+    import zipfile
+
+    idxs = chapter_texts.chapter_indices(book_id)
+    if not idxs:
+        raise HTTPException(404, "no chapters stored")
+    meta = chapter_texts.meta(book_id)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("meta.json", __import__("json").dumps(
+            {**meta, "book_id": book_id, "chapters_count": len(idxs), "max_index": max(idxs)}))
+        for i in idxs:
+            t = chapter_texts.get_text(book_id, i)
+            if t:
+                zf.writestr(f"{i}.txt", t)
+    return Response(content=buf.getvalue(), media_type="application/zip")
 
 
 # ---- hot-reload watcher for the prompt .md and config.yaml (points 5 + 9) ----

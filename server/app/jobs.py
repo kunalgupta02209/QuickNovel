@@ -10,10 +10,11 @@ log = logging.getLogger("jobs")
 
 
 class Job:
-    def __init__(self, model: str | None, items: list[dict], script_type: str = "grammar"):
+    def __init__(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = ""):
         self.id = uuid.uuid4().hex[:12]
         self.model = model or "auto"  # "auto" -> fix_text routes via the script task
         self.script_type = script_type  # grammar | performance
+        self.book_id = book_id  # enables charmap memory backfill
         self.items = items  # [{id, text}]
         self.status = "queued"  # queued | running | paused | done | cancelled | error
         self.progress = 0
@@ -47,11 +48,20 @@ class Job:
                     self.status = "cancelled"
                     log.info("job %s cancelled at %d/%d", self.id, self.progress, self.total)
                     return
+                # Backfill character memory from the server-side map when the app sent none —
+                # this alone resurrects the character-consistency feature with zero app change.
+                memory = it.get("character_memory") or ""
+                if not memory and self.book_id:
+                    try:
+                        from . import charmap
+                        memory = charmap.prompt_block(self.book_id, int(it.get("id", -1)) if str(it.get("id", "")).lstrip("-").isdigit() else None)
+                    except Exception:  # noqa: BLE001
+                        memory = ""
                 res = await fix_text(
                     it["text"],
                     None if self.model == "auto" else self.model,
                     previous_chapters=it.get("previous_chapters") or "",
-                    character_memory=it.get("character_memory") or "",
+                    character_memory=memory,
                     on_chunk=lambda i, n, out: setattr(self, "current_chunk", f"chunk {i + 1}/{n}"),
                     script_type=self.script_type,
                     pause_event=self._pause,
@@ -123,8 +133,8 @@ class JobManager:
     def __init__(self) -> None:
         self.jobs: dict[str, Job] = {}
 
-    def submit(self, model: str | None, items: list[dict], script_type: str = "grammar") -> Job:
-        job = Job(model, items, script_type)
+    def submit(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = "") -> Job:
+        job = Job(model, items, script_type, book_id)
         self.jobs[job.id] = job
         job._task = asyncio.create_task(job.run())
         return job
