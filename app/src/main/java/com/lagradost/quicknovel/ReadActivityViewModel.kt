@@ -604,7 +604,8 @@ class ReadActivityViewModel : ViewModel() {
     // val textFont: LiveData<String> = _textFont
 
     fun switchVisibility() {
-        _bottomVisibility.postValue(!(_bottomVisibility.value ?: false))
+        // Main-thread setValue (not postValue) so the tap toggles the chrome on this frame, no delay.
+        _bottomVisibility.value = !(_bottomVisibility.value ?: false)
     }
 
 
@@ -612,6 +613,11 @@ class ReadActivityViewModel : ViewModel() {
 
     var desiredIndex: ScrollIndex? = null
     var desiredTTSIndex: ScrollIndex? = null
+
+    // One-shot: on a live voice/model change, resume the TTS driver at THIS sentence (not the scroll
+    // anchor) so the current line is re-spoken in the new voice. Consumed once in startTTSThread.
+    @Volatile
+    private var ttsResumeAt: ScrollIndex? = null
 
     private fun updateChapters() {
         for (idx in chaptersTitlesInternal.size until book.size()) {
@@ -1531,7 +1537,8 @@ class ReadActivityViewModel : ViewModel() {
             var ttsEndTime = ttsStartTime + ttsTimer
             val ttsHasTimer = ttsEndTime > ttsStartTime
 
-            val dIndex = desiredTTSIndex ?: desiredIndex ?: return@coroutineScope
+            // A pending live voice-change resume wins over the scroll anchor (consumed once).
+            val dIndex = ttsResumeAt?.also { ttsResumeAt = null } ?: desiredTTSIndex ?: desiredIndex ?: return@coroutineScope
 
             if (ttsThreadMutex.isLocked) return@coroutineScope
             ttsThreadMutex.withLock {
@@ -2221,9 +2228,21 @@ class ReadActivityViewModel : ViewModel() {
         com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
         refreshTtsCacheScope() // re-scope the "generating" underline to the new voice/model (or null)
         val wasRunning = isTTSRunning()
+        // Capture the currently-spoken line BEFORE stopTTS (whose finally posts _ttsLine=null) so the
+        // driver resumes at the SAME sentence in the new voice — auditioning voices on the fly.
+        val resumeLine = if (wasRunning) _ttsLine.value else null
         stopTTS()
         ttsSession?.release()
         initTTSSession(ctx)
+        if (resumeLine != null) {
+            ttsResumeAt = ScrollIndex(
+                resumeLine.index,
+                innerCharToIndex(resumeLine.index, resumeLine.startChar) ?: 0,
+                resumeLine.startChar,
+            )
+            _ttsLine.postValue(resumeLine) // hold the highlight through the rebuild
+            _ttsPending.postValue(true)    // brief flicker while the new voice re-synthesizes
+        }
         if (wasRunning) startTTS()
     }
 

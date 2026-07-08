@@ -30,6 +30,8 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.animation.doOnEnd
+import androidx.core.view.ViewCompat
+import androidx.core.view.updatePadding
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -104,22 +106,12 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
     private fun hideSystemUI() {
-
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, binding.readerContainer).let { controller ->
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
+        insetsController?.hide(WindowInsetsCompat.Type.systemBars())
 
         fun lowerBottomNav(v: View) {
             v.translationY = 0f
             ObjectAnimator.ofFloat(v, "translationY", v.height.toFloat()).apply {
-                duration = 200
+                duration = 120
                 start()
             }.doOnEnd {
                 v.isVisible = false
@@ -134,7 +126,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             "translationY",
             -binding.readToolbarHolder.height.toFloat()
         ).apply {
-            duration = 200
+            duration = 120
             start()
         }.doOnEnd {
             binding.readToolbarHolder.isVisible = false
@@ -142,11 +134,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
     private fun showSystemUI() {
-        WindowCompat.setDecorFitsSystemWindows(window, true)
-        WindowInsetsControllerCompat(
-            window,
-            binding.readerContainer
-        ).show(WindowInsetsCompat.Type.systemBars())
+        insetsController?.show(WindowInsetsCompat.Type.systemBars())
 
         binding.readToolbarHolder.isVisible = true
 
@@ -154,7 +142,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             v.isVisible = true
             v.translationY = v.height.toFloat()
             ObjectAnimator.ofFloat(v, "translationY", 0f).apply {
-                duration = 200
+                duration = 120
                 start()
             }
         }
@@ -164,12 +152,13 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         binding.readToolbarHolder.translationY = -binding.readToolbarHolder.height.toFloat()
 
         ObjectAnimator.ofFloat(binding.readToolbarHolder, "translationY", 0f).apply {
-            duration = 200
+            duration = 120
             start()
         }
     }
 
     lateinit var binding: ReadMainBinding
+    private var insetsController: WindowInsetsControllerCompat? = null
     private val viewModel: ReadActivityViewModel by viewModels()
 
     // Registered as a property so it is set up before the activity is STARTED (registering later
@@ -957,10 +946,35 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             setNavigationOnClickListener {
                 this@ReadActivity2.onBackPressed()
             }
+            // Gear (top-right) to open the read-aloud settings without stopping playback; shown only
+            // while TTS is running (toggled in the ttsStatus observer).
+            inflateMenu(R.menu.read_tts_toolbar)
+            menu.findItem(R.id.action_tts_settings)?.isVisible = false
+            setOnMenuItemClickListener { item ->
+                if (item.itemId == R.id.action_tts_settings) { showTtsSettingsDialog(); true } else false
+            }
         }
 
         //updateTimeText()
         fixPaddingStatusbar(binding.readToolbarHolder)
+
+        // Go edge-to-edge ONCE + cache the controller. Previously hide/showSystemUI toggled
+        // decorFitsSystemWindows and rebuilt the controller on every tap, forcing a full inset
+        // relayout each time — that was the chrome show/hide lag.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        insetsController = WindowInsetsControllerCompat(window, binding.readerContainer).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        // Bottom bar must clear the nav bar now that decor no longer fits system windows (the toolbar
+        // top is already handled by fixPaddingStatusbar above).
+        ViewCompat.setOnApplyWindowInsetsListener(binding.readerBottomViewHolder) { v, insets ->
+            v.updatePadding(bottom = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom)
+            insets
+        }
 
         observe(viewModel.paddingHorizontalLive) {
             updatePadding()
@@ -1156,11 +1170,8 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             isReadAloudActive = isTTSRunning
             updateToolbarTitleVisibility()
 
-            /*if (isTTSRunning) {
-                binding.readToolbar.inflateMenu(R.menu.sleep_timer)
-            } else {
-                binding.readToolbar.menu.clear()
-            }*/
+            // Show the read-aloud settings gear only while TTS is active.
+            binding.readToolbar.menu.findItem(R.id.action_tts_settings)?.isVisible = isTTSRunning
 
             binding.readerBottomView.isGone = isTTSRunning
             binding.readerBottomViewTts.isVisible = isTTSRunning
