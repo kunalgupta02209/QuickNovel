@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from watchfiles import awatch
 
-from . import tts_engine, tts_storage
+from . import dashboard, history, telemetry, tts_engine, tts_storage
 from .config import CONFIG_PATH, config
 from .fixer import fix_text
 from .jobs import jobs
@@ -19,6 +19,8 @@ from .tts_jobs import tts_jobs
 setup_logging()
 log = logging.getLogger("main")
 app = FastAPI(title="QuickNovel LLM Fix Server", version="1.0")
+app.include_router(dashboard.router)
+app.include_router(telemetry.router)
 
 
 # ---- request/response models ----
@@ -235,6 +237,7 @@ def tts_audio_zip(book_id: str, model_id: str, sid: int, index: int):
 # ---- hot-reload watcher for the prompt .md and config.yaml (points 5 + 9) ----
 @app.on_event("startup")
 async def _startup():
+    history.on_server_start()
     asyncio.create_task(_watch())
     # Size the TTS synthesis semaphore + optionally pre-provision models (download only, no engine).
     from .tts_jobs import configure as _tts_configure

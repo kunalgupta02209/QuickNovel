@@ -162,6 +162,18 @@ def invalidate_engines() -> None:
         _pool_counts.clear()
 
 
+def pool_stats() -> dict:
+    """Loaded/free engine instances per model (dashboard)."""
+    with _pool_cond:
+        return {
+            "max_per_model": _max_pool,
+            "models": {
+                mid: {"loaded": _pool_counts.get(mid, 0), "free": len(_pools.get(mid, []))}
+                for mid in set(_pool_counts) | set(_pools)
+            },
+        }
+
+
 def _build_config(defn: ModelDef, num_threads: int):
     import sherpa_onnx  # imported lazily so the module loads even without the dep during unit checks
 

@@ -17,6 +17,9 @@ dependencies = [
     "sherpa-onnx==1.13.4",
     "sherpa-onnx-core==1.13.4",
     "numpy>=1.26",
+    # Dashboard: process/host resource sampling + async Ollama status probe.
+    "psutil>=5.9",
+    "httpx>=0.27",
 ]
 
 # This is a run-only application (a FastAPI service + a CLI), not a distributable library,

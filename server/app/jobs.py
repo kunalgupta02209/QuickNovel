@@ -3,6 +3,7 @@ import logging
 import time
 import uuid
 
+from . import history
 from .fixer import fix_text
 
 log = logging.getLogger("jobs")
@@ -18,6 +19,10 @@ class Job:
         self.total = len(items)
         self.results: dict[str, str] = {}  # item id -> fixed text
         self.created = time.time()
+        self.started: float | None = None
+        self.finished: float | None = None
+        self.chars_in = sum(len(i.get("text") or "") for i in items)
+        self.chars_out = 0
         self.error: str | None = None
         self.current_chunk = ""
         self._task: asyncio.Task | None = None
@@ -25,6 +30,7 @@ class Job:
 
     async def run(self) -> None:
         self.status = "running"
+        self.started = time.time()
         log.info("job %s started: %d items, model=%s", self.id, self.total, self.model)
         try:
             for it in self.items:
@@ -37,8 +43,10 @@ class Job:
                     self.model,
                     previous_chapters=it.get("previous_chapters") or "",
                     character_memory=it.get("character_memory") or "",
+                    on_chunk=lambda i, n, out: setattr(self, "current_chunk", f"chunk {i + 1}/{n}"),
                 )
                 self.results[str(it["id"])] = fixed
+                self.chars_out += len(fixed)
                 self.progress += 1
             self.status = "done"
             log.info("job %s done", self.id)
@@ -49,6 +57,16 @@ class Job:
             log.exception("job %s failed", self.id)
             self.status = "error"
             self.error = str(e)
+        finally:
+            self.finished = time.time()
+            self.current_chunk = ""
+            history.append({
+                "kind": "llm", "id": self.id, "model": self.model, "status": self.status,
+                "items": self.total, "done": self.progress,
+                "chars_in": self.chars_in, "chars_out": self.chars_out,
+                "duration_s": round(self.finished - (self.started or self.finished), 1),
+                "error": self.error,
+            })
 
     def cancel(self) -> None:
         self._cancel = True
@@ -63,6 +81,9 @@ class Job:
             "progress": self.progress,
             "total": self.total,
             "created": self.created,
+            "started": self.started,
+            "finished": self.finished,
+            "current_chunk": self.current_chunk,
             "error": self.error,
         }
 

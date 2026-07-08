@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import re
+import time
 
 import litellm
 
-from . import storage
+from . import metrics, storage
 from .config import config
 from .prompts import prompts
 
@@ -18,6 +19,11 @@ litellm.drop_params = True
 # model + multiple KV caches blow the VRAM budget and every request thrashes to a crawl. One
 # call at a time keeps each request fast; extra callers simply queue.
 _gpu_sem = asyncio.Semaphore(1)
+
+
+def gpu_busy() -> bool:
+    """True while an LLM chunk is generating (dashboard indicator)."""
+    return _gpu_sem.locked()
 
 
 _SENTENCE = re.compile(r"(?<=[.!?…”\"'])\s+")
@@ -161,6 +167,7 @@ async def fix_text(
         # over-generate a chat trailer and a looping model can't run away.
         max_gen = min(1536, len(chunk) // 3 + 96)
         async with _gpu_sem:
+            _t0 = time.time()
             resp = await litellm.acompletion(
                 model=litellm_model,
                 messages=messages,
@@ -169,6 +176,13 @@ async def fix_text(
                 timeout=240,
                 max_tokens=max_gen,
                 **sampling,
+            )
+            # dashboard rate metrics (usage fields may be absent on some providers)
+            _usage = getattr(resp, "usage", None)
+            metrics.record_llm_chunk(
+                time.time() - _t0,
+                getattr(_usage, "prompt_tokens", 0) or 0,
+                getattr(_usage, "completion_tokens", 0) or 0,
             )
         out = _clean(resp.choices[0].message.content)
         log.info("  chunk %d/%d in=%d out=%d", i + 1, len(chunks), len(chunk), len(out))

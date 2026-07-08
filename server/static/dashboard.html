@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickNovel Server</title>
+<style>
+  :root { --bg:#0e1116; --card:#161b22; --line:#2d333b; --fg:#e6edf3; --dim:#8b949e;
+          --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; } h2 { font-size:14px; margin:0 0 10px; color:var(--acc); }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:14px; }
+  .grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .kv { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12.5px; margin-bottom:8px; }
+  .kv b { color:var(--fg); font-weight:600; } .kv span { color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:var(--dim); font-weight:500; padding:3px 6px;
+       border-bottom:1px solid var(--line); }
+  td { padding:4px 6px; border-bottom:1px solid #21262d; vertical-align:middle; }
+  .bar { background:#21262d; border-radius:4px; height:8px; min-width:70px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--acc); border-radius:4px;
+           transition:width .5s; }
+  .done .bar i { background:var(--ok); } .error .bar i { background:var(--err); }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
+          border:1px solid var(--line); color:var(--dim); }
+  .pill.running { color:var(--acc); border-color:var(--acc); }
+  .pill.done { color:var(--ok); border-color:var(--ok); }
+  .pill.error, .pill.cancelled { color:var(--err); border-color:var(--err); }
+  .pill.online { color:var(--ok); border-color:var(--ok); }
+  .pill.offline { color:var(--dim); }
+  button { background:none; border:1px solid var(--err); color:var(--err); border-radius:6px;
+           padding:1px 8px; font-size:11px; cursor:pointer; } button:hover { background:#f8514922; }
+  .chips { display:flex; flex-wrap:wrap; gap:3px; margin-top:2px; }
+  .chip { width:10px; height:10px; border-radius:2px; background:#21262d; }
+  .chip.part { background:var(--warn); } .chip.full { background:var(--ok); }
+  .empty { color:var(--dim); font-size:12.5px; padding:8px 0; }
+  #logs { display:none; background:#0a0d12; border:1px solid var(--line); border-radius:8px;
+          padding:10px; font:11px/1.5 ui-monospace,Consolas,monospace; white-space:pre-wrap;
+          max-height:320px; overflow:auto; margin-top:12px; }
+  a { color:var(--acc); cursor:pointer; text-decoration:none; }
+  .offline-banner { display:none; background:#f8514922; border:1px solid var(--err);
+          color:var(--err); border-radius:8px; padding:8px 12px; margin-bottom:12px; }
+</style>
+</head>
+<body>
+<h1>QuickNovel Server</h1>
+<div class="sub" id="serverline">connecting…</div>
+<div class="offline-banner" id="offline">server unreachable — retrying…</div>
+
+<div class="grid">
+  <div class="card"><h2>Grammar fixes (LLM)</h2><div class="kv" id="llmkv"></div><div id="llmjobs"></div></div>
+  <div class="card"><h2>TTS generation</h2><div class="kv" id="ttskv"></div><div id="ttsjobs"></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>Devices</h2><div id="devices"></div></div>
+  <div class="card"><h2>Resources</h2><div class="kv" id="res"></div></div>
+  <div class="card"><h2>Last 24h</h2><div class="kv" id="hist"></div>
+    <div style="margin-top:8px"><a onclick="toggleLogs()">server log tail</a></div></div>
+</div>
+<div id="logs"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtDur = s => s == null ? 'n/a' : s < 90 ? Math.round(s) + 's' : s < 5400 ? Math.round(s/60) + 'm' : Math.round(s/3600) + 'h';
+const fmtMb = m => m == null ? 'n/a' : m > 1024 ? (m/1024).toFixed(1) + ' GB' : Math.round(m) + ' MB';
+const ago = t => t ? fmtDur(Date.now()/1000 - t) + ' ago' : 'n/a';
+
+function bar(done, total, status) {
+  const pct = total ? Math.min(100, 100*done/total) : 0;
+  return `<div class="bar ${esc(status)}"><i style="width:${pct}%"></i></div>`;
+}
+function jobRow(j, kindPath) {
+  const cancel = j.status === 'running' || j.status === 'queued'
+    ? `<button onclick="cancelJob('${kindPath}','${esc(j.id)}')">stop</button>` : '';
+  const rate = j.rate != null ? `${j.rate}/s` : '';
+  const eta = j.eta_s != null ? ` · eta ${fmtDur(j.eta_s)}` : '';
+  const extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
+  const label = j.book_id ? `${esc(j.book_id)} · ${esc(j.model_id)}/s${j.sid}` : esc(j.model || '');
+  let chips = '';
+  if (j.chapters && j.chapters.length && j.status === 'running') {
+    chips = '<div class="chips">' + j.chapters.map(c =>
+      `<span class="chip ${c.ready ? 'full' : c.done > 0 ? 'part' : ''}" title="c${c.index} ${c.done}/${c.total}"></span>`).join('') + '</div>';
+  }
+  return `<tr class="${esc(j.status)}"><td><span class="pill ${esc(j.status)}">${esc(j.status)}</span></td>
+    <td>${label}<div style="color:var(--dim);font-size:11px">${esc(j.id)}${extra}</div>${chips}</td>
+    <td>${j.progress}/${j.total}${bar(j.progress, j.total, j.status)}
+      <div style="color:var(--dim);font-size:11px">${rate}${eta}</div></td>
+    <td>${cancel}</td></tr>`;
+}
+function jobsTable(list, kindPath) {
+  if (!list || !list.length) return '<div class="empty">no jobs</div>';
+  return `<table><tr><th></th><th>job</th><th>progress</th><th></th></tr>${list.map(j => jobRow(j, kindPath)).join('')}</table>`;
+}
+async function cancelJob(kindPath, id) {
+  await fetch(`${kindPath}/${id}/cancel`, {method:'POST'}).catch(()=>{});
+  refresh();
+}
+function deviceCard(d) {
+  const act = d.active || {};
+  const rows = [];
+  (d.books || []).filter(b => b.downloading || (act.downloads||[]).some(a => a.id === b.id)).forEach(b =>
+    rows.push(`<tr><td>book sync</td><td>${esc(b.name)}</td><td>${b.downloaded}/${b.total}${bar(b.downloaded, b.total, 'running')}</td></tr>`));
+  (act.downloads || []).forEach(a => rows.push(`<tr><td>download</td><td>#${esc(a.id)} ${esc(a.state)}</td><td>${a.downloaded}/${a.total}${bar(a.downloaded, a.total, 'running')}</td></tr>`));
+  (act.tts_remote || []).forEach(a => rows.push(`<tr><td>chapter sync → server</td><td>${esc(a.key)} <span style="color:var(--dim)">job ${esc(a.job_id||'…')}</span></td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (act.tts_pregen || []).forEach(a => rows.push(`<tr><td>on-device TTS</td><td>${esc(a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (act.llm_fix || []).forEach(a => rows.push(`<tr><td>grammar fix</td><td>${esc(a.key)}</td><td>${a.done}/${a.total}${bar(a.done, a.total, 'running')}</td></tr>`));
+  (d.tts_cache || []).forEach(c => rows.push(`<tr><td>tts cache</td><td>${esc(c.name || c.book)} · ${esc(c.model)}/s${c.sid}</td><td>${c.chapters_done}/${c.total} ch · ${fmtMb((c.bytes||0)/1048576)}</td></tr>`));
+  return `<div style="margin-bottom:12px">
+    <b>${esc(d.device_name || d.device_id)}</b>
+    <span class="pill ${d.online ? 'online' : 'offline'}">${d.online ? 'online' : 'offline'}</span>
+    <span style="color:var(--dim);font-size:11px"> v${esc(d.app_version||'?')} · seen ${ago(d.received_at)}</span>
+    ${rows.length ? `<table style="margin-top:6px"><tr><th>activity</th><th></th><th>progress</th></tr>${rows.join('')}</table>` : '<div class="empty">idle</div>'}
+  </div>`;
+}
+function kv(el, pairs) {
+  el.innerHTML = pairs.map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join('');
+}
+let logsOpen = false;
+async function toggleLogs() {
+  logsOpen = !logsOpen; $('logs').style.display = logsOpen ? 'block' : 'none';
+  if (logsOpen) pollLogs();
+}
+async function pollLogs() {
+  if (!logsOpen) return;
+  try { $('logs').textContent = await (await fetch('/dashboard/api/logs?n=200')).text();
+        $('logs').scrollTop = $('logs').scrollHeight; } catch {}
+  setTimeout(pollLogs, 4000);
+}
+async function refresh() {
+  if (document.hidden) return;
+  let o;
+  try { o = await (await fetch('/dashboard/api/overview')).json(); $('offline').style.display = 'none'; }
+  catch { $('offline').style.display = 'block'; return; }
+  $('serverline').textContent =
+    `up ${fmtDur(o.server.uptime_s)} · default model ${o.server.default_model}` +
+    (o.server.gpu_busy ? ' · LLM generating' : '');
+  kv($('llmkv'), [['tok/s', o.llm.rates.tok_per_s], ['chunks/min', o.llm.rates.chunks_per_min],
+                  ['avg chunk', o.llm.rates.avg_chunk_s != null ? o.llm.rates.avg_chunk_s + 's' : 'n/a']]);
+  $('llmjobs').innerHTML = jobsTable(o.llm.jobs, '/jobs');
+  kv($('ttskv'), [['sentences/min', o.tts.rates.sentences_per_min],
+                  ['avg sentence', o.tts.rates.avg_sentence_s != null ? o.tts.rates.avg_sentence_s + 's' : 'n/a'],
+                  ['streams', `${o.tts.sem.in_flight}/${o.tts.sem.max_concurrent}`],
+                  ['engines', Object.entries(o.tts.pool.models || {}).map(([m, p]) => `${m}:${p.loaded}`).join(' ') || '0']]);
+  $('ttsjobs').innerHTML = jobsTable(o.tts.jobs, '/tts/jobs');
+  $('devices').innerHTML = (o.devices && o.devices.length)
+    ? o.devices.map(deviceCard).join('') : '<div class="empty">no devices reporting</div>';
+  const r = o.resources, pairs = [];
+  if (r.proc) pairs.push(['server cpu', r.proc.cpu_percent + '%'], ['rss', fmtMb(r.proc.rss_mb)], ['threads', r.proc.threads]);
+  if (r.cgroup && r.cgroup.cpu_percent != null) pairs.push(['container cpu', r.cgroup.cpu_percent + '%']);
+  if (r.cgroup && r.cgroup.mem_mb != null) pairs.push(['container mem', fmtMb(r.cgroup.mem_mb)]);
+  if (r.host_vm) pairs.push(['host cpu', r.host_vm.cpu_percent + '%'], ['host mem', `${fmtMb(r.host_vm.mem_used_mb)} / ${fmtMb(r.host_vm.mem_total_mb)}`]);
+  if (r.disk) pairs.push(['tts audio', fmtMb(r.disk.tts_audio_mb)], ['models', fmtMb(r.disk.models_mb)]);
+  if (r.ollama && r.ollama.loaded_models) r.ollama.loaded_models.forEach(m =>
+    pairs.push(['ollama ' + m.name, `${fmtMb(m.size_vram_mb)} vram`]));
+  kv($('res'), pairs.length ? pairs : [['resources', 'n/a']]);
+  const h = o.history_24h || {};
+  kv($('hist'), [
+    ['llm jobs', `${(h.llm||{}).done ?? 0}✓ ${(h.llm||{}).errors ?? 0}✗`],
+    ['tts jobs', `${(h.tts||{}).done ?? 0}✓ ${(h.tts||{}).errors ?? 0}✗`],
+    ['avg llm', fmtDur((h.llm||{}).avg_duration_s)], ['avg tts', fmtDur((h.tts||{}).avg_duration_s)],
+    ['restarts', h.server_starts ?? 0]]);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
