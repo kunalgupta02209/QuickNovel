@@ -172,8 +172,9 @@ def tts_models():
 
 
 @app.post("/tts/batch")
-def tts_batch(req: TtsBatchReq):
-    """Submit a book's chapters for server-side synthesis; audio is fetched by book identity."""
+async def tts_batch(req: TtsBatchReq):
+    """Submit a book's chapters for server-side synthesis; audio is fetched by book identity.
+    Must be async: tts_jobs.submit calls asyncio.create_task, which needs the running event loop."""
     defn = tts_engine.MODELS.get(req.model_id)
     if defn is None:
         raise HTTPException(400, f"unknown model {req.model_id}")

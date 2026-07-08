@@ -63,6 +63,8 @@ tts:
   models_dir: "/models"
   audio_dir: "/data/tts-audio"
   provider: "cpu"          # CPU matches on-device + avoids VRAM contention with the LLM. "cuda" opt-in.
-  num_threads: 4           # ONNX threads per synthesis
-  max_concurrent: 2        # parallel sentence syntheses (drop to 1 on a shared GPU)
+  num_threads: 3           # ONNX threads per synthesis (8 streams x 3 = 24 threads, headroom on 32)
+  # Parallel synthesis streams = pool of OfflineTts instances (one each; ~40 MB kitten / ~130 MB
+  # kokoro per instance, created lazily). 8 suits a 16c/32t box; lower it if RAM is tight.
+  max_concurrent: 8
   preload: ["kitten"]      # pre-download these models on startup (download only; engine loads lazily)

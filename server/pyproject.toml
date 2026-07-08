@@ -12,8 +12,10 @@ dependencies = [
     "watchfiles==1.0.3",
     "pydantic==2.10.4",
     # Server-side TTS offload: same sherpa-onnx runtime + models as the Android app (Kitten/Kokoro).
-    # 1.12.x+ includes the Kitten model config; 1.13.4 is current.
+    # 1.13.4 splits the native runtime into sherpa-onnx-core (a *dynamic* dep uv won't auto-pull),
+    # so pin it explicitly or _sherpa_onnx.so can't find libonnxruntime.so.
     "sherpa-onnx==1.13.4",
+    "sherpa-onnx-core==1.13.4",
     "numpy>=1.26",
 ]
 

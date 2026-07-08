@@ -26,6 +26,7 @@ def configure(max_concurrent: int) -> None:
     global _sem, _sem_size
     _sem_size = max(1, int(max_concurrent))
     _sem = asyncio.Semaphore(_sem_size)
+    tts_engine.set_pool_size(_sem_size)  # one OfflineTts per concurrent stream
 
 
 def _semaphore() -> asyncio.Semaphore:

@@ -110,11 +110,56 @@ def ensure_model(defn: ModelDef) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# Engine cache (one OfflineTts per model, built lazily)
+# Engine POOL — one OfflineTts per concurrent stream (an ORT session is NOT safe for concurrent
+# generate, exactly like on-device). Instances are created lazily up to [_max_pool] and reused, so
+# memory scales with actual concurrency, not the cap.
 # --------------------------------------------------------------------------------------------------
 
-_engines: dict[str, object] = {}
-_engine_lock = threading.Lock()
+_pools: dict[str, list] = {}          # model_id -> list of FREE OfflineTts instances
+_pool_counts: dict[str, int] = {}     # model_id -> total instances created
+_pool_cond = threading.Condition()
+_max_pool = 2                         # set from config (max_concurrent)
+
+
+def set_pool_size(n: int) -> None:
+    global _max_pool
+    _max_pool = max(1, int(n))
+
+
+def _acquire(defn: ModelDef, num_threads: int):
+    """Borrow an OfflineTts for this model, creating one (up to _max_pool) or waiting for a free one."""
+    with _pool_cond:
+        free = _pools.setdefault(defn.id, [])
+        while True:
+            if free:
+                return free.pop()
+            if _pool_counts.get(defn.id, 0) < _max_pool:
+                _pool_counts[defn.id] = _pool_counts.get(defn.id, 0) + 1
+                break  # reserve a slot, build outside the lock (slow)
+            _pool_cond.wait()
+    try:
+        import sherpa_onnx
+        ensure_model(defn)
+        eng = sherpa_onnx.OfflineTts(_build_config(defn, num_threads))
+        log.info("TTS engine instance #%d loaded: %s", _pool_counts[defn.id], defn.id)
+        return eng
+    except Exception:
+        with _pool_cond:  # release the reserved slot on failure
+            _pool_counts[defn.id] = _pool_counts.get(defn.id, 1) - 1
+            _pool_cond.notify()
+        raise
+
+
+def _release(defn: ModelDef, eng) -> None:
+    with _pool_cond:
+        _pools.setdefault(defn.id, []).append(eng)
+        _pool_cond.notify()
+
+
+def invalidate_engines() -> None:
+    with _pool_cond:
+        _pools.clear()
+        _pool_counts.clear()
 
 
 def _build_config(defn: ModelDef, num_threads: int):
@@ -145,28 +190,6 @@ def _build_config(defn: ModelDef, num_threads: int):
         raise ValueError(f"unsupported model kind {defn.kind}")
 
     return sherpa_onnx.OfflineTtsConfig(model=model, max_num_sentences=1)
-
-
-def get_engine(defn: ModelDef, num_threads: int):
-    eng = _engines.get(defn.id)
-    if eng is not None:
-        return eng
-    with _engine_lock:
-        eng = _engines.get(defn.id)
-        if eng is not None:
-            return eng
-        import sherpa_onnx
-
-        ensure_model(defn)
-        eng = sherpa_onnx.OfflineTts(_build_config(defn, num_threads))
-        _engines[defn.id] = eng
-        log.info("TTS engine loaded: %s (sr=%d)", defn.id, defn.sample_rate)
-        return eng
-
-
-def invalidate_engines() -> None:
-    with _engine_lock:
-        _engines.clear()
 
 
 # --------------------------------------------------------------------------------------------------
@@ -212,6 +235,9 @@ def synth_wav(model_id: str, sid: int, text: str, num_threads: int) -> bytes:
         raise KeyError(f"unknown model {model_id}")
     if sid < 0 or sid >= defn.speakers:
         raise ValueError(f"sid {sid} out of range for {model_id} (0..{defn.speakers - 1})")
-    eng = get_engine(defn, num_threads)
-    audio = eng.generate(text, sid=sid, speed=1.0)  # text is positional (pybind builtin)
-    return to_wav_bytes(audio.samples, audio.sample_rate, trim=True)
+    eng = _acquire(defn, num_threads)  # one instance per concurrent stream (safe parallel generate)
+    try:
+        audio = eng.generate(text, sid=sid, speed=1.0)  # text is positional (pybind builtin)
+        return to_wav_bytes(audio.samples, audio.sample_rate, trim=True)
+    finally:
+        _release(defn, eng)
