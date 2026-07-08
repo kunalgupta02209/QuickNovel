@@ -105,60 +105,26 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             }
     }
 
+    // The chrome holders stay VISIBLE and just translate off-screen. Toggling isVisible GONE/VISIBLE
+    // forced a FrameLayout relayout (a measure pass over the RecyclerView) on every tap — the ~14 ms
+    // hitch that made the app bar toggle feel laggy. Translation-only is transform-only (no layout).
     private fun hideSystemUI() {
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
-
-        fun lowerBottomNav(v: View) {
-            v.translationY = 0f
-            ObjectAnimator.ofFloat(v, "translationY", v.height.toFloat()).apply {
-                duration = 120
-                start()
-            }.doOnEnd {
-                v.isVisible = false
-            }
-        }
-
-        lowerBottomNav(binding.readerBottomViewHolder)
-
-        binding.readToolbarHolder.translationY = 0f
-        ObjectAnimator.ofFloat(
-            binding.readToolbarHolder,
-            "translationY",
-            -binding.readToolbarHolder.height.toFloat()
-        ).apply {
-            duration = 120
-            start()
-        }.doOnEnd {
-            binding.readToolbarHolder.isVisible = false
-        }
+        binding.readerBottomViewHolder.animate()
+            .translationY(binding.readerBottomViewHolder.height.toFloat()).setDuration(TOGGLE_MS).start()
+        binding.readToolbarHolder.animate()
+            .translationY(-binding.readToolbarHolder.height.toFloat()).setDuration(TOGGLE_MS).start()
     }
 
     private fun showSystemUI() {
         insetsController?.show(WindowInsetsCompat.Type.systemBars())
-
-        binding.readToolbarHolder.isVisible = true
-
-        fun higherBottomNavView(v: View) {
-            v.isVisible = true
-            v.translationY = v.height.toFloat()
-            ObjectAnimator.ofFloat(v, "translationY", 0f).apply {
-                duration = 120
-                start()
-            }
-        }
-
-        higherBottomNavView(binding.readerBottomViewHolder)
-
-        binding.readToolbarHolder.translationY = -binding.readToolbarHolder.height.toFloat()
-
-        ObjectAnimator.ofFloat(binding.readToolbarHolder, "translationY", 0f).apply {
-            duration = 120
-            start()
-        }
+        binding.readerBottomViewHolder.animate().translationY(0f).setDuration(TOGGLE_MS).start()
+        binding.readToolbarHolder.animate().translationY(0f).setDuration(TOGGLE_MS).start()
     }
 
     lateinit var binding: ReadMainBinding
     private var insetsController: WindowInsetsControllerCompat? = null
+    private val TOGGLE_MS = 110L // app-chrome slide duration (snappy)
     private val viewModel: ReadActivityViewModel by viewModels()
 
     // Registered as a property so it is set up before the activity is STARTED (registering later
@@ -950,11 +916,17 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                 this@ReadActivity2.onBackPressed()
             }
             // Gear (top-right) to open the read-aloud settings without stopping playback; shown only
-            // while TTS is running (toggled in the ttsStatus observer).
+            // while TTS is running (toggled in the ttsStatus observer). "Edit with AI" lives in the
+            // 3-dot overflow (SDK >= 24, the llama.cpp binding's minSdk).
             inflateMenu(R.menu.read_tts_toolbar)
             menu.findItem(R.id.action_tts_settings)?.isVisible = false
+            menu.findItem(R.id.action_llm_fix)?.isVisible = Build.VERSION.SDK_INT >= 24
             setOnMenuItemClickListener { item ->
-                if (item.itemId == R.id.action_tts_settings) { showTtsSettingsDialog(); true } else false
+                when (item.itemId) {
+                    R.id.action_tts_settings -> { showTtsSettingsDialog(); true }
+                    R.id.action_llm_fix -> { com.lagradost.quicknovel.ui.llm.LlmFixDialog.show(this@ReadActivity2, viewModel); true }
+                    else -> false
+                }
             }
         }
 
@@ -1076,14 +1048,9 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             viewModel.startTTS()
         }
 
-        // Top-right "fix / rewrite with AI" button — requires API 24 (the llama.cpp binding's minSdk).
-        if (android.os.Build.VERSION.SDK_INT >= 24) {
-            binding.readLlmFix.setOnClickListener {
-                com.lagradost.quicknovel.ui.llm.LlmFixDialog.show(this, viewModel)
-            }
-        } else {
-            binding.readLlmFix.visibility = android.view.View.GONE
-        }
+        // "Edit with AI" moved into the toolbar 3-dot overflow (wired above) so it no longer sits
+        // behind the read-aloud settings gear; the old top-right FAB is retired.
+        binding.readLlmFix.visibility = android.view.View.GONE
 
         binding.ttsActionForward.setOnClickListener {
             viewModel.forwardsTTS()

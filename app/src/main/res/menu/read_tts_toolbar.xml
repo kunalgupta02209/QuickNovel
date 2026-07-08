@@ -6,4 +6,10 @@
             app:showAsAction="always"
             app:iconTint="?attr/iconColor"
             android:title="@string/tts_settings" />
+    <!-- "Edit with AI" moved off the overlapping top-right FAB into the 3-dot overflow. -->
+    <item
+            android:id="@+id/action_llm_fix"
+            android:icon="@drawable/ic_auto_fix"
+            app:showAsAction="never"
+            android:title="@string/llm_fix_title" />
 </menu>
