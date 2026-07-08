@@ -96,6 +96,12 @@
                 android:summary="@string/tts_show_cover_desc"
                 app:defaultValue="true"
                 android:icon="@drawable/ic_baseline_volume_up_24" />
+        <SwitchPreference
+                app:key="@string/tts_prefetch_on_open_key"
+                android:title="@string/tts_prefetch_on_open"
+                android:summary="@string/tts_prefetch_on_open_desc"
+                app:defaultValue="false"
+                android:icon="@drawable/ic_baseline_volume_up_24" />
 
         <Preference
                 app:key="@string/theme_key"

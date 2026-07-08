@@ -14,7 +14,14 @@ import com.lagradost.quicknovel.TTS_PREGEN_FOLDER
 import com.lagradost.quicknovel.TtsPregenWorkManager
 import com.lagradost.quicknovel.mvvm.logError
 import com.lagradost.quicknovel.util.Event
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Orchestration singleton for background on-device TTS pre-generation — a trimmed clone of
@@ -100,71 +107,94 @@ object TtsPregenManager {
 
     // ---- the job ----
 
-    suspend fun runJob(context: Context, req: PregenRequest) {
+    suspend fun runJob(context: Context, req: PregenRequest): Unit = coroutineScope {
         val key = req.key
-        synchronized(lock) { if (!currentJobs.add(key)) return }
+        synchronized(lock) { if (!currentJobs.add(key)) return@coroutineScope }
 
         val ctx = context.applicationContext
         val bookIdStr = "b${req.bookId}"
         val def = TtsModels.byId(req.modelId)
         val authorNotes = getKey<Boolean>(EPUB_AUTHOR_NOTES, true) ?: true
         val total = req.rangeEnd - req.rangeStart + 1
-        var done = 0
+        val done = AtomicInteger(0)
+        val stopped = AtomicBoolean(false)
+        val pausedByUser = AtomicBoolean(false)
         var finalState = DownloadState.IsDone
 
-        val synth = TtsChapterSynthesizer(ctx, def, req.sid, bookIdStr)
         try {
-            if (!TtsModels.isReady(ctx, def) || !synth.open()) {
+            if (!TtsModels.isReady(ctx, def)) {
                 finalState = DownloadState.IsFailed
             } else {
                 emit(ctx, req, DownloadState.IsDownloading, 0, total)
-                loop@ for (index in req.rangeStart..req.rangeEnd) {
-                    if (!waitIfPaused(ctx, req, done, total)) { finalState = DownloadState.IsStopped; break@loop }
-
-                    if (!TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) {
-                        val r = synth.synthChapter(
-                            req.apiName, req.author, req.name, index, authorNotes,
-                            onProgress = { _, _ -> },
-                            shouldStop = { peekStop(key) },
-                        )
-                        if (r < 0) {
-                            finalState = if (peekStop(key)) DownloadState.IsStopped else DownloadState.IsFailed
-                            break@loop
+                // Single emitter: only the coordinator writes progress/notification/record (workers
+                // never call emit -> no concurrent setKey). It also drives pause/resume/stop.
+                val coordinator = launch(Dispatchers.IO) {
+                    while (isActive && !stopped.get()) {
+                        when (consumeAction(key)) {
+                            DownloadActionType.Stop -> stopped.set(true)
+                            DownloadActionType.Pause -> {
+                                pausedByUser.set(true); emit(ctx, req, DownloadState.IsPaused, done.get(), total)
+                            }
+                            DownloadActionType.Resume -> {
+                                pausedByUser.set(false); emit(ctx, req, DownloadState.IsDownloading, done.get(), total)
+                            }
+                            else -> {}
                         }
+                        if (!pausedByUser.get() && !stopped.get()) {
+                            emit(ctx, req, DownloadState.IsDownloading, done.get(), total)
+                        }
+                        delay(300)
                     }
-                    done++
-                    emit(ctx, req, DownloadState.IsDownloading, done, total)
+                }
+
+                val cursor = AtomicInteger(req.rangeStart)
+                val ok = withContext(Dispatchers.IO) {
+                    TtsSynthPool.run<Int>(
+                        ctx, def, req.sid, bookIdStr, TtsSynthPool.sizing(ctx, def),
+                        stop = { stopped.get() },
+                        paused = { pausedByUser.get() },
+                        next = { cursor.getAndIncrement().takeIf { it <= req.rangeEnd } },
+                        body = { synth, index ->
+                            val failed = if (!TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) {
+                                val r = synth.synthChapter(
+                                    req.apiName, req.author, req.name, index, authorNotes,
+                                    onProgress = { _, _ -> },
+                                    shouldStop = { stopped.get() },
+                                    awaitResume = { TtsPlaybackGate.awaitClear({ pausedByUser.get() }, { stopped.get() }) },
+                                )
+                                r < 0 && !stopped.get()
+                            } else false
+                            if (!failed) done.incrementAndGet()
+                            !failed
+                        },
+                    )
+                }
+                coordinator.cancel()
+                finalState = when {
+                    stopped.get() -> DownloadState.IsStopped
+                    !ok -> DownloadState.IsFailed
+                    else -> DownloadState.IsDone
                 }
             }
         } catch (t: Throwable) {
             logError(t); finalState = DownloadState.IsFailed
         } finally {
-            synth.close()
-            emit(ctx, req, finalState, done, total)
+            emit(ctx, req, finalState, done.get(), total)
             synchronized(lock) { currentJobs.remove(key); pendingAction.remove(key) }
         }
     }
 
-    /** Returns true to continue, false if a Stop was requested. Spins while paused. */
-    private suspend fun waitIfPaused(ctx: Context, req: PregenRequest, done: Int, total: Int): Boolean {
-        when (consumeAction(req.key)) {
-            DownloadActionType.Stop -> return false
-            DownloadActionType.Pause -> {
-                emit(ctx, req, DownloadState.IsPaused, done, total)
-                while (true) {
-                    delay(200)
-                    when (consumeAction(req.key)) {
-                        DownloadActionType.Resume -> {
-                            emit(ctx, req, DownloadState.IsDownloading, done, total); return true
-                        }
-                        DownloadActionType.Stop -> return false
-                        else -> {}
-                    }
-                }
-            }
-            else -> {}
-        }
-        return true
+    /**
+     * Auto-start whole-book pre-generation on book open (Feature 3). No-op if already running or the
+     * whole range is already cached. Enqueues the same serial WorkManager chain as manual pre-gen.
+     */
+    fun ensureAutoPregen(context: Context, req: PregenRequest) {
+        if (isRunning(req.key)) return
+        val ctx = context.applicationContext
+        val total = req.rangeEnd - req.rangeStart + 1
+        if (total <= 0) return
+        if (TtsAudioCache.doneChapterCount(ctx, "b${req.bookId}", req.modelId, req.sid) >= total) return
+        enqueue(context, req)
     }
 
     /** Update in-memory progress + notification + the persisted record in one shot. */

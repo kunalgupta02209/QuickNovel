@@ -148,6 +148,14 @@
                 android:text="@string/tts_denoise_audio"
                 android:textColor="?attr/textColor" />
 
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/tts_autogen_switch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/tts_autogen"
+                android:textColor="?attr/textColor" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tts_pregen_button"
                 android:layout_width="match_parent"

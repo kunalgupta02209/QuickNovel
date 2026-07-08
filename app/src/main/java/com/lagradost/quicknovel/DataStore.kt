@@ -43,6 +43,8 @@ const val EPUB_TTS_OD_BUFFER: String = "reader_epub_tts_od_buffer" // Int: sente
 const val EPUB_TTS_OD_GAP: String = "reader_epub_tts_od_gap"       // Int: inter-sentence gap in ms (0..2000)
 const val EPUB_TTS_OD_ENHANCE: String = "reader_epub_tts_od_enhance" // Boolean: clean up raspy on-device audio
 const val EPUB_TTS_OD_DENOISE: String = "reader_epub_tts_od_denoise" // Boolean: GTCRN neural denoiser (heavier)
+const val EPUB_TTS_OD_AUTOGEN: String = "reader_epub_tts_od_autogen" // Boolean: auto-pregen all downloaded chapters on book open
+const val EPUB_TTS_PREFETCH: String = "tts_prefetch_on_open"         // Boolean: cache current section + next chapter on chapter open
 const val TTS_PREGEN_FOLDER: String = "tts_pregen_data"           // sub-keyed by "<bookId>|<modelId>|<sid>" -> TtsPregenRecord
 
 // ---- On-device LLM novel-fixer (Qwen2.5 GGUF via llama.cpp) ----

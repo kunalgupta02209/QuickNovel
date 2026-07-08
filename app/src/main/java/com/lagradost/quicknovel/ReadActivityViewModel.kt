@@ -684,8 +684,10 @@ class ReadActivityViewModel : ViewModel() {
         changeIndex(save.toScroll())
 
         // update the read area if changed index
-        if (current != save.index)
+        if (current != save.index) {
             updateReadArea()
+            maybePrefetchOnOpen(save.index) // F2: cache this + the next chapter when a new chapter opens
+        }
 
         // load forwards and backwards
         updateIndex(visibility.firstInMemory.index)
@@ -1318,6 +1320,7 @@ class ReadActivityViewModel : ViewModel() {
         this.book = book
         _title.postValue(book.title())
 
+        maybeStartAutoPregen(context)
         updateChapters()
         val imageLoader: ImageLoader = SingletonImageLoader.get(context)
 
@@ -1847,6 +1850,8 @@ class ReadActivityViewModel : ViewModel() {
     override fun onCleared() {
         println("onCleared===${System.currentTimeMillis()}")
         lastChangeIndex?.let { setScrollKeys(it) }
+        com.lagradost.quicknovel.tts.TtsPrefetchManager.cancelAll()
+        com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
         ttsSession?.release()
         ttsSession = null
         mlTranslator?.close()
@@ -1949,6 +1954,67 @@ class ReadActivityViewModel : ViewModel() {
             (ttsSession as? OnDeviceTtsEngine)?.updateDenoise(value)
             if (value) ensureDenoiserDownloaded()
         }
+
+    // Feature 3: auto-pregen all downloaded chapters (multi-threaded) as soon as the book opens.
+    var ttsAutogen by PreferenceDelegate(EPUB_TTS_OD_AUTOGEN, false, Boolean::class)
+
+    private fun maybeStartAutoPregen(context: Context) {
+        if (!ttsAutogen || ttsEngineType != TtsEngineType.ON_DEVICE) return
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        val ctx = context.applicationContext
+        ioSafe {
+            val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
+            if (!com.lagradost.quicknovel.tts.TtsModels.isReady(ctx, def) || !onDeviceLanguageOk()) return@ioSafe
+            // EPUB imports have no downloaded per-chapter files -> nothing to pre-generate.
+            val meta = (book as? QuickBook)?.data?.meta ?: return@ioSafe
+            val author = meta.author ?: ""
+            val total = BookDownloader2Helper.downloadInfo(ctx, author, meta.name, meta.apiName)?.total?.toInt()
+                ?: return@ioSafe
+            if (total <= 0) return@ioSafe
+            val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
+            val req = com.lagradost.quicknovel.tts.TtsPregenManager.PregenRequest(
+                bookId = BookDownloader2Helper.generateId(meta.apiName, author, meta.name),
+                apiName = meta.apiName, author = author, name = meta.name,
+                posterUrl = (book as? QuickBook)?.data?.poster,
+                modelId = def.id, sid = sid, rangeStart = 0, rangeEnd = total - 1,
+            )
+            com.lagradost.quicknovel.tts.TtsPregenManager.ensureAutoPregen(ctx, req)
+        }
+    }
+
+    // Feature 2: prefetch-on-open (app setting "tts_prefetch_on_open").
+    private val prefetchOnOpen: Boolean
+        get() = context?.let {
+            androidx.preference.PreferenceManager.getDefaultSharedPreferences(it)
+                .getBoolean(EPUB_TTS_PREFETCH, false)
+        } ?: false
+
+    private fun ttsLinesFor(index: Int): List<TTSHelper.TTSLine>? =
+        (chapterData[index] as? Resource.Success)?.value?.ttsLines
+
+    private fun maybePrefetchOnOpen(index: Int) {
+        if (!prefetchOnOpen || ttsEngineType != TtsEngineType.ON_DEVICE || !::book.isInitialized) return
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        val ctx = context ?: return
+        val def = com.lagradost.quicknovel.tts.TtsModels.byId(ttsOnDeviceModel)
+        if (!com.lagradost.quicknovel.tts.TtsModels.isReady(ctx, def) || !onDeviceLanguageOk()) return
+        val bookId = runCatching { com.lagradost.quicknovel.tts.TtsAudioCache.bookIdFor(book) }.getOrNull() ?: return
+        val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(ttsOnDeviceVoice)?.second ?: 0
+        ioSafe {
+            loadIndividualChapter(index)
+            loadIndividualChapter(index + 1)
+            val batches = chapterMutex.withLock {
+                buildList {
+                    // Skip the current chapter while actively listening — the live look-ahead covers it.
+                    if (currentTTSStatus != TTSHelper.TTSStatus.IsRunning)
+                        ttsLinesFor(index)?.takeIf { it.isNotEmpty() }?.let { add(it) }
+                    ttsLinesFor(index + 1)?.takeIf { it.isNotEmpty() }?.let { add(it) } // next chapter
+                }
+            }
+            if (batches.isNotEmpty())
+                com.lagradost.quicknovel.tts.TtsPrefetchManager.prefetch(ctx, bookId, def, sid, batches)
+        }
+    }
 
     private val _denoiserDownloading = MutableLiveData(false)
     val denoiserDownloading: LiveData<Boolean> = _denoiserDownloading
@@ -2106,6 +2172,9 @@ class ReadActivityViewModel : ViewModel() {
      * (on-device playback is wired in P2); the pref is stored so the selection persists. */
     private fun recreateTtsEngine() {
         val ctx = context ?: return
+        // Voice/model changed: abandon any prefetch keyed to the old voice + release the gate.
+        com.lagradost.quicknovel.tts.TtsPrefetchManager.cancelAll()
+        com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(false)
         val wasRunning = isTTSRunning()
         stopTTS()
         ttsSession?.release()
