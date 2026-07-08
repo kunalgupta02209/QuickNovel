@@ -51,6 +51,7 @@ object RemoteTtsClient {
     fun submitBatch(
         baseUrl: String, bookId: String, modelId: String, sid: Int, sampleRate: Int,
         chapters: List<ChapterReq>, bookName: String = "",
+        deviceId: String = "", deviceName: String = "",
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
@@ -59,6 +60,8 @@ object RemoteTtsClient {
                 "model_id" to modelId,
                 "sid" to sid,
                 "sample_rate" to sampleRate,
+                "device_id" to deviceId,
+                "device_name" to deviceName,
                 "items" to chapters.map { ch ->
                     mapOf(
                         "index" to ch.index,

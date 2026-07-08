@@ -102,6 +102,9 @@ object TelemetryManager {
         }
     }
 
+    fun deviceIdentity(ctx: Context): Pair<String, String> =
+        deviceId(ctx) to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+
     @SuppressLint("HardwareIds")
     private fun deviceId(ctx: Context): String =
         runCatching { Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID) }

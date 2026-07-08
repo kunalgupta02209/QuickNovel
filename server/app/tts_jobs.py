@@ -43,10 +43,12 @@ def sem_stats() -> dict:
 
 class TtsJob:
     def __init__(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
-                 num_threads: int, book_name: str = ""):
+                 num_threads: int, book_name: str = "", device_id: str = "", device_name: str = ""):
         self.id = uuid.uuid4().hex[:12]
         self.book_id = book_id
         self.book_name = book_name  # human-readable (dashboard); book_id stays the storage key
+        self.device_id = device_id  # submitting device (attribution — devices share the audio cache
+        self.device_name = device_name  # by design, but each polls only its own job)
         self.model_id = model_id
         self.sid = sid
         self.sample_rate = sample_rate
@@ -131,6 +133,7 @@ class TtsJob:
     def summary(self) -> dict:
         return {
             "id": self.id, "book_id": self.book_id, "book_name": self.book_name,
+            "device_id": self.device_id, "device_name": self.device_name,
             "model_id": self.model_id, "sid": self.sid,
             "status": self.status, "progress": self.progress, "total": self.total,
             "synthesized": self.synthesized, "current": self.current, "created": self.created,
@@ -153,8 +156,8 @@ class TtsJobManager:
         self.jobs: dict[str, TtsJob] = {}
 
     def submit(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
-               num_threads: int, book_name: str = "") -> TtsJob:
-        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads, book_name)
+               num_threads: int, book_name: str = "", device_id: str = "", device_name: str = "") -> TtsJob:
+        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads, book_name, device_id, device_name)
         self.jobs[job.id] = job
         job._task = asyncio.create_task(job.run())
         return job

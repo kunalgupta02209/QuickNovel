@@ -79,8 +79,9 @@ function jobRow(j, kindPath) {
   const eta = j.eta_s != null ? ` · eta ${fmtDur(j.eta_s)}` : '';
   let extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
   if (j.current) extra += ` · now: ch ${j.current.index + 1}${j.current.name ? ' — ' + esc(j.current.name) : ''}`;
+  const dev = j.device_name ? ` · ${esc(j.device_name)}` : '';
   const label = j.book_id
-    ? `${esc(j.book_name || j.book_id)} · ${esc(j.model_id)}/s${j.sid}`
+    ? `${esc(j.book_name || j.book_id)} · ${esc(j.model_id)}/s${j.sid}${dev}`
     : esc(j.model || '');
   let chips = '';
   if (j.chapters && j.chapters.length && j.status === 'running') {

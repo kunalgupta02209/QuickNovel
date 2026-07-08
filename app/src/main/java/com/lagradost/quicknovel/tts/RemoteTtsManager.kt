@@ -209,8 +209,10 @@ object RemoteTtsManager {
                 RemoteTtsClient.getJob(req.serverUrl, it)?.status in setOf("running", "queued")
             }
             if (jobId == null) {
+                val (devId, devName) = com.lagradost.quicknovel.telemetry.TelemetryManager.deviceIdentity(ctx)
                 jobId = RemoteTtsClient.submitBatch(
-                    req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters, bookName = req.name,
+                    req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters,
+                    bookName = req.name, deviceId = devId, deviceName = devName,
                 ) ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
             }
             runCatching { setKey(TTS_REMOTE_FOLDER, key, jobId) }

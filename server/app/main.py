@@ -163,6 +163,8 @@ class TtsBatchReq(BaseModel):
     model_id: str
     sid: int = 0
     sample_rate: int = 24000
+    device_id: str = ""    # submitting device (dashboard attribution; cancel decisions stay informed)
+    device_name: str = ""
     items: list[TtsChapter]
 
 
@@ -196,6 +198,7 @@ async def tts_batch(req: TtsBatchReq):
     job = tts_jobs.submit(
         req.book_id, req.model_id, req.sid, req.sample_rate,
         [i.model_dump() for i in req.items], config.tts_num_threads, req.book_name,
+        req.device_id, req.device_name,
     )
     return {"job_id": job.id}
 
