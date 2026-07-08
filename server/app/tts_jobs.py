@@ -97,13 +97,17 @@ class TtsJob:
                         self.status = "cancelled"
                         return
                     key = sent["key"]
+                    # P5 casting: a sentence may carry its own voice/pace; storage stays under the
+                    # JOB's sid dir (the app's pull path), keyed by content hash of the text.
+                    s_sid = sent.get("sid") if sent.get("sid") is not None else self.sid
+                    s_speed = float(sent.get("speed") or 1.0)
                     if not tts_storage.exists(self.book_id, self.model_id, self.sid, index, key):
                         async with _semaphore():
                             _in_flight += 1
                             try:
                                 _t0 = time.time()
                                 wav = await asyncio.to_thread(
-                                    tts_engine.synth_wav, self.model_id, self.sid, sent["text"], self.num_threads
+                                    tts_engine.synth_wav, self.model_id, s_sid, sent["text"], self.num_threads, s_speed
                                 )
                                 metrics.record_tts_sentence(time.time() - _t0, len(sent.get("text") or ""))
                             finally:

@@ -84,9 +84,12 @@ object TtsModels {
             kind = Kind.SUPERTONIC,
             dirName = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
             approxSizeMb = 129,
-            speakerCount = 1,
+            // Research-verified (voice.bin = 10 speaker blocks): sids 0-4 female F1-F5, 5-9 male
+            // M1-M5. Output is 44.1 kHz, not the family default 24 kHz.
+            speakerCount = 10,
+            sampleRate = 44100,
             assets = listOf(Asset("$TTS_BASE/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2", archive = true)),
-            note = "Supports inline prosody tags like <laugh>, <sigh>, <breath>.",
+            note = "Expressive; only <laugh> is a verified working inline tag.",
         ),
         ModelDef(
             id = "zipvoice",
@@ -171,8 +174,18 @@ object TtsModels {
             VoiceLabel("George", "British male · mellow, mature — relaxed British narration"),
             VoiceLabel("Lewis", "British male · deep, mellow — low, unhurried narration"),
         ),
+        // Research-verified 10-voice roster: sids 0-4 female (F1-F5), 5-9 male (M1-M5).
         "supertonic" to listOf(
-            VoiceLabel("Milo", "Male · lively, upbeat — expressive, reads inline <laugh>/<sigh>/<breath> tags"),
+            VoiceLabel("Freya", "Female 1 · clear, bright — expressive lead"),
+            VoiceLabel("Willow", "Female 2 · soft, warm — gentle reading"),
+            VoiceLabel("Iris", "Female 3 · poised, articulate"),
+            VoiceLabel("Hazel", "Female 4 · mellow, low-key"),
+            VoiceLabel("June", "Female 5 · lively, youthful"),
+            VoiceLabel("Milo", "Male 1 · lively, upbeat — reads <laugh> inline"),
+            VoiceLabel("Otis", "Male 2 · warm, steady"),
+            VoiceLabel("Rufus", "Male 3 · deep, resonant"),
+            VoiceLabel("Silas", "Male 4 · calm, measured"),
+            VoiceLabel("Amos", "Male 5 · gravelly, mature"),
         ),
         "zipvoice" to listOf(
             VoiceLabel("Nova", "Female · crisp, newsreader tone — zero-shot clone of the bundled zh-en reference"),

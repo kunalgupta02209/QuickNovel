@@ -200,6 +200,14 @@
                 android:text="@string/tts_server_autogen"
                 android:textColor="?attr/textColor" />
 
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/tts_casting_switch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/tts_casting"
+                android:textColor="?attr/textColor" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/tts_pregen_button"
                 android:layout_width="match_parent"

@@ -135,7 +135,12 @@ class OnDeviceTtsEngine(
         @Volatile var pcm: FloatArray? = null   // null = not generated (yet) / freed
         @Volatile var failed = false
         @Volatile var cancelled = false
+        @Volatile var cue: CueRenderer.CueDirective? = null // performance-script rendering (P5)
     }
+
+    /** Set by the reader when a performance script + casting are active: per-line voice/pace/cues.
+     *  Resolved in the producer (render) so cache keys and synthesis agree. */
+    @Volatile var cueResolver: ((TTSHelper.TTSLine) -> CueRenderer.CueDirective?)? = null
 
     private val lock = Object()
     private val queue = ArrayList<Item>()                    // ordered by seq; entries kept for the segment
@@ -366,14 +371,26 @@ class OnDeviceTtsEngine(
     private fun render(item: Item) {
         val engine = tts ?: run { item.failed = true; return }
 
+        // Performance-script rendering: per-line voice/pace/effective-text from the cue resolver.
+        val cue = cueResolver?.invoke(item.line)
+        item.cue = cue
+        val useSid = cue?.sid ?: sid
+        val useSpeed = cue?.speed ?: 1.0f
+        val useText = cue?.effectiveText ?: item.line.speakOutMsg
+
         // READ-THROUGH: a cache hit is a ~ms disk read instead of real-time synthesis. The denoise
         // variant keeps denoised vs raw audio as separate cache entries, so the toggle is honest.
         val variant = if (denoise) ".dn1" else ""
-        val cacheFile = cacheBookId?.let { TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line, variant) }
+        val cacheFile = cacheBookId?.let {
+            if (cue != null)
+                TtsAudioCache.fileForText(appContext, it, def.id, useSid, item.line.index, useText, variant)
+            else
+                TtsAudioCache.fileFor(appContext, it, def.id, sid, item.line, variant)
+        }
         if (cacheFile != null && cacheFile.exists()) {
             val cached = TtsAudioCache.load(cacheFile)
             if (cached != null) {
-                Log.d(TAG, "render CACHE HIT sid=$sid samples=${cached.size}")
+                Log.d(TAG, "render CACHE HIT sid=$useSid samples=${cached.size}")
                 synchronized(lock) { item.pcm = cached; lock.notifyAll() }
                 return
             }
@@ -389,9 +406,9 @@ class OnDeviceTtsEngine(
         }
         val t0 = System.currentTimeMillis()
         try {
-            val gen = TtsModels.resolveGenerationConfig(appContext, def, sid, 1.0f)
-            if (gen != null) engine.generateWithConfigAndCallback(text = item.line.speakOutMsg, config = gen, callback = sink)
-            else engine.generateWithCallback(text = item.line.speakOutMsg, sid = sid, speed = 1.0f, callback = sink)
+            val gen = TtsModels.resolveGenerationConfig(appContext, def, useSid, useSpeed)
+            if (gen != null) engine.generateWithConfigAndCallback(text = useText, config = gen, callback = sink)
+            else engine.generateWithCallback(text = useText, sid = useSid, speed = useSpeed, callback = sink)
         } catch (t: Throwable) {
             logError(t); item.failed = true
             synchronized(lock) { lock.notifyAll() }
@@ -435,7 +452,8 @@ class OnDeviceTtsEngine(
             // Clean up the raw model audio (de-clip / de-ess / normalize) right before playback.
             // Run the post-processor when enhancing OR when a non-Natural style needs its warmth EQ
             // (the style path also applies the normalize/soft-clip safety around the low-shelf boost).
-            val style = voiceStyle
+            // A performance-script delivery (whisper/excited/...) overrides the base style per line.
+            val style = item.cue?.let { AudioPostProcessor.styleForDelivery(it.delivery) } ?: voiceStyle
             val pcm = item.pcm?.let {
                 if (enhanceAudio || style != AudioPostProcessor.VoiceStyle.NATURAL)
                     AudioPostProcessor.process(it, sampleRate, style)
@@ -444,6 +462,11 @@ class OnDeviceTtsEngine(
             if (!item.cancelled && !item.failed && pcm != null) {
                 val next: TTSHelper.TTSLine? = synchronized(lock) { queue.getOrNull(playPos + 1)?.line }
                 onAudibleLine?.invoke(item.line, next) // highlight + notification, audio-synced
+                // Dramatic beat before the line (cue events on non-tag engines render as pauses).
+                item.cue?.pauseBeforeMs?.takeIf { it > 0 }?.let { ms ->
+                    val silence = FloatArray((ms * sampleRate / 1000).coerceIn(0, sampleRate * 2))
+                    track?.write(silence, 0, silence.size, AudioTrack.WRITE_BLOCKING)
+                }
                 val t = track
                 var off = 0
                 while (running && !item.cancelled && t != null && off < pcm.size) {

@@ -240,7 +240,7 @@ def to_wav_bytes(samples, sample_rate: int, trim: bool = True) -> bytes:
     return buf.getvalue()
 
 
-def synth_wav(model_id: str, sid: int, text: str, num_threads: int) -> bytes:
+def synth_wav(model_id: str, sid: int, text: str, num_threads: int, speed: float = 1.0) -> bytes:
     """Synthesize one sentence -> canonical WAV bytes. Raises on unknown model / bad sid."""
     defn = MODELS.get(model_id)
     if defn is None:
@@ -249,7 +249,7 @@ def synth_wav(model_id: str, sid: int, text: str, num_threads: int) -> bytes:
         raise ValueError(f"sid {sid} out of range for {model_id} (0..{defn.speakers - 1})")
     eng = _acquire(defn, num_threads)  # one instance per concurrent stream (safe parallel generate)
     try:
-        audio = eng.generate(text, sid=sid, speed=1.0)  # text is positional (pybind builtin)
+        audio = eng.generate(text, sid=sid, speed=max(0.5, min(speed or 1.0, 2.0)))
         return to_wav_bytes(audio.samples, audio.sample_rate, trim=True)
     finally:
         _release(defn, eng)

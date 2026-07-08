@@ -89,6 +89,13 @@ object TtsAudioCache {
      *  byte-placeable into this cache. Must stay in lockstep with [fileFor]. */
     fun keyFor(line: TTSHelper.TTSLine): String = sha1Hex(line.speakOutMsg).take(24)
 
+    /** Text-keyed variant for cue rendering (P5): the EFFECTIVE synthesized text (e.g. with a
+     *  Supertonic <laugh> tag) can differ from the display line, and the voice can be a cast sid. */
+    fun fileForText(
+        ctx: Context, bookId: String, modelId: String, sid: Int, chapterIndex: Int,
+        text: String, variant: String = "",
+    ): File = File(chapterDir(ctx, bookId, modelId, sid, chapterIndex), sha1Hex(text).take(24) + variant + ".wav")
+
     private fun sha1Hex(s: String): String =
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }

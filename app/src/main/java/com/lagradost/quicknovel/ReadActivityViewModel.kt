@@ -1446,6 +1446,7 @@ class ReadActivityViewModel : ViewModel() {
                     engine.updateEnhance(ttsEnhance)
                     engine.updateDenoise(ttsDenoise)
                     engine.updateVoiceStyle(com.lagradost.quicknovel.tts.AudioPostProcessor.VoiceStyle.fromPref(ttsVoiceStyle))
+                    engine.cueResolver = buildCueResolver() // performance-script multi-voice/cues (P5)
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
                         _ttsPending.postValue(false) // audio started -> stop the flicker
@@ -2177,6 +2178,7 @@ class ReadActivityViewModel : ViewModel() {
             if (value == llmScriptMode) return
             llmScriptModeKey = value.coerceIn(0, 2)
             refreshChapters()
+            refreshCueResolver() // performance mode drives multi-voice/cue playback
         }
 
     /** LEGACY compat for existing UI: "show fixed" == any generated script selected. */
@@ -2259,6 +2261,38 @@ class ReadActivityViewModel : ViewModel() {
             runOnMainThread { llmScriptMode = 1 } // show the spliced fix (setter reloads)
             if (llmScriptMode == 1) refreshChapters() // already in grammar mode -> force reload
         }
+    }
+
+    /** Multi-voice casting for performance scripts (P5); characters speak in their cast voices. */
+    var ttsCastingEnabled by PreferenceDelegate(EPUB_TTS_CASTING, true, Boolean::class)
+
+    /** Per-line cue resolver for the on-device engine — active only in performance mode. Caches one
+     *  aligner per chapter; the ScriptDoc + local charmap copy do the rest. */
+    private fun buildCueResolver(): ((TTSHelper.TTSLine) -> com.lagradost.quicknovel.tts.CueRenderer.CueDirective?)? {
+        if (llmScriptMode != 2) return null
+        val ctx = context ?: return null
+        val bookId = llmBookId() ?: return null
+        // refresh the cached map copy in the background (cast edits on the dashboard flow in)
+        if (llmServerUrl.isNotBlank()) ioSafe {
+            com.lagradost.quicknovel.tts.CueRenderer.syncMap(ctx, llmServerUrl, bookId)
+        }
+        val perChapter = HashMap<Int, ((TTSHelper.TTSLine) -> com.lagradost.quicknovel.tts.CueRenderer.CueDirective?)?>()
+        return fun(line: TTSHelper.TTSLine): com.lagradost.quicknovel.tts.CueRenderer.CueDirective? {
+            val resolver = synchronized(perChapter) {
+                perChapter.getOrPut(line.index) {
+                    com.lagradost.quicknovel.tts.CueRenderer.resolverFor(
+                        ctx, bookId, ttsOnDeviceModel, llmModel, llmPromptVersion,
+                        line.index, ttsCastingEnabled,
+                    )
+                }
+            }
+            return resolver?.invoke(line)
+        }
+    }
+
+    /** Re-derive the per-line cue resolver (casting toggle / script-mode change mid-session). */
+    fun refreshCueResolver() {
+        (ttsSession as? OnDeviceTtsEngine)?.cueResolver = buildCueResolver()
     }
 
     /** One hit of the reader's character/world lookup: a card + tappable occurrences. */

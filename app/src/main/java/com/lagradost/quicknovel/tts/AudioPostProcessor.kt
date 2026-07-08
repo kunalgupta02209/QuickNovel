@@ -37,11 +37,27 @@ object AudioPostProcessor {
     ) {
         NATURAL(1.00f, 1.00f, 200f, 0.0f, 6000f, -5f),  // == the original chain (no-op)
         WARM(0.96f, 0.97f, 200f, +2.5f, 5000f, -6f),
-        SULTRY(0.92f, 0.93f, 220f, +3.5f, 4500f, -7f);
+        SULTRY(0.92f, 0.93f, 220f, +3.5f, 4500f, -7f),
+
+        // Delivery presets (QN-Cue performance scripts): DSP approximations of speech manners the
+        // plain sherpa models can't produce (no emotion parameter exists in the API).
+        SOFT(0.98f, 0.95f, 220f, +2.0f, 4200f, -8f),
+        WHISPER(1.00f, 0.93f, 260f, +1.0f, 3400f, -14f),
+        EXCITED(1.03f, 1.08f, 180f, +0.5f, 7000f, -2f),
+        SHOUT(1.00f, 1.02f, 150f, +1.5f, 6500f, -3f);
 
         companion object {
             fun fromPref(v: Int): VoiceStyle = entries.getOrElse(v) { NATURAL }
         }
+    }
+
+    /** Map a QN-Cue delivery to a DSP preset (null = keep the user's chosen base style). */
+    fun styleForDelivery(delivery: String?): VoiceStyle? = when (delivery) {
+        "soft", "sad", "tired" -> VoiceStyle.SOFT
+        "whisper", "fearful" -> VoiceStyle.WHISPER
+        "excited" -> VoiceStyle.EXCITED
+        "shout", "angry" -> VoiceStyle.SHOUT
+        else -> null
     }
 
     fun process(input: FloatArray, sampleRate: Int, style: VoiceStyle = VoiceStyle.NATURAL): FloatArray {

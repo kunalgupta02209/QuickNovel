@@ -179,6 +179,8 @@ def resume_job(jid: str):
 class TtsSentence(BaseModel):
     key: str
     text: str
+    sid: int | None = None      # per-sentence voice override (P5 casting)
+    speed: float | None = None  # per-sentence pace override
 
 
 class TtsChapter(BaseModel):

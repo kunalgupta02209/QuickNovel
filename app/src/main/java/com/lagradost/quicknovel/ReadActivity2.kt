@@ -573,6 +573,12 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsServerAutogenSwitch.isChecked = viewModel.ttsServerAutogen
         b.ttsServerAutogenSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsServerAutogen = on }
 
+        b.ttsCastingSwitch.isChecked = viewModel.ttsCastingEnabled
+        b.ttsCastingSwitch.setOnCheckedChangeListener { _, on ->
+            viewModel.ttsCastingEnabled = on
+            viewModel.refreshCueResolver()
+        }
+
         b.ttsCachedButton.setOnClickListener {
             // Per-chapter TTS cache overview for the current book+voice; tap a chapter to jump there.
             viewModel.cachedChapterOverview { items ->
