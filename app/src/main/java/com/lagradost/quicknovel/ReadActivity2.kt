@@ -31,6 +31,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.animation.doOnEnd
 import androidx.core.view.ViewCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.updatePadding
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -105,28 +106,25 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             }
     }
 
+    // System nav/status bars are tied to the app chrome (re-coupled). The holders stay VISIBLE so they
+    // are always MEASURED — as GONE they had height 0 and translationY couldn't move them, so show/hide
+    // silently did nothing until a scroll forced a layout ("only works while scrolling").
     private fun hideSystemUI() {
-        val b = binding.readerBottomViewHolder
-        val t = binding.readToolbarHolder
-        android.util.Log.d("Chrome", "HIDE botH=${b.height} botVis=${b.visibility} botTY=${b.translationY} tbH=${t.height} tbVis=${t.visibility}")
-        // Re-couple: system nav/status bars hide together with the app chrome.
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
-        b.animate().translationY(b.height.toFloat()).setDuration(TOGGLE_MS).start()
-        t.animate().translationY(-t.height.toFloat()).setDuration(TOGGLE_MS).start()
+        slideChrome(binding.readToolbarHolder, shown = false, up = true)
+        slideChrome(binding.readerBottomViewHolder, shown = false, up = false)
     }
 
     private fun showSystemUI() {
-        val b = binding.readerBottomViewHolder
-        val t = binding.readToolbarHolder
-        t.visibility = View.VISIBLE
-        b.visibility = View.VISIBLE
-        // Re-couple: bring the system bars back with the app chrome.
         insetsController?.show(WindowInsetsCompat.Type.systemBars())
-        android.util.Log.d("Chrome", "SHOW botH=${b.height} botVis=${b.visibility} botTY=${b.translationY} tbH=${t.height} tbVis=${t.visibility}")
-        // If a holder hasn't been measured yet (started GONE), snap it in place rather than sliding
-        // from an unknown offset; otherwise slide from its current (hidden) offset.
-        if (b.height == 0) b.post { b.translationY = 0f } else b.animate().translationY(0f).setDuration(TOGGLE_MS).start()
-        if (t.height == 0) t.post { t.translationY = 0f } else t.animate().translationY(0f).setDuration(TOGGLE_MS).start()
+        slideChrome(binding.readToolbarHolder, shown = true, up = true)
+        slideChrome(binding.readerBottomViewHolder, shown = true, up = false)
+    }
+
+    private fun slideChrome(v: View, shown: Boolean, up: Boolean) {
+        val ty = { if (shown) 0f else if (up) -v.height.toFloat() else v.height.toFloat() }
+        if (v.height > 0) v.animate().translationY(ty()).setDuration(TOGGLE_MS).start()
+        else v.doOnLayout { it.translationY = ty() } // not measured yet: snap once laid out, no anim
     }
 
     lateinit var binding: ReadMainBinding
@@ -948,9 +946,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         // Start fullscreen; the content tap re-shows the bars (system bars tied to the app chrome).
+        // Holders stay VISIBLE (measured) — the initial hidden state is applied by slideChrome via
+        // doOnLayout once they have a height.
         insetsController?.hide(WindowInsetsCompat.Type.systemBars())
-        binding.readToolbarHolder.visibility = View.GONE
-        binding.readerBottomViewHolder.visibility = View.GONE
+        binding.readToolbarHolder.visibility = View.VISIBLE
+        binding.readerBottomViewHolder.visibility = View.VISIBLE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -1201,9 +1201,7 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
                             // won't be misread as a tap. (Logs showed the only missed taps were clean
                             // taps landing while the list was still coasting.)
                             val moved = kotlin.math.hypot(e.x - downX, e.y - downY)
-                            val tap = moved < tapSlop && e.eventTime - downTime < 350
-                            android.util.Log.d("Chrome", "TAP up moved=${"%.1f".format(moved)} dt=${e.eventTime - downTime} -> ${if (tap) "switchVisibility" else "ignore"}")
-                            if (tap) viewModel.switchVisibility()
+                            if (moved < tapSlop && e.eventTime - downTime < 350) viewModel.switchVisibility()
                         }
                     }
                     return false // observe only; scroll + link taps still work
@@ -1214,7 +1212,6 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         }
 
         observe(viewModel.bottomVisibility) { visibility ->
-            android.util.Log.d("Chrome", "observer bottomVisibility=$visibility")
             if (visibility) {
                 showSystemUI()
                 // here we actually do not want to fix the tts bug, as it will cause a bad behavior
