@@ -64,6 +64,16 @@ class OnDeviceTtsEngine(
      *  highlight AND the media-notification now-playing text, audio-synced. */
     var onAudibleLine: ((TTSHelper.TTSLine, TTSHelper.TTSLine?) -> Unit)? = null
 
+    /** Fired from speak() when a sentence becomes the play target: (line, pending). `pending=true`
+     *  means its audio isn't ready yet (a skip beyond the synthesized look-ahead) — the UI can jump
+     *  the highlight there immediately and flicker it until [onAudibleLine] fires (audio starts). */
+    var onLineTarget: ((TTSHelper.TTSLine, Boolean) -> Unit)? = null
+
+    /** Local pause: the consumer holds before playing the next sentence's audio (so a skip during a
+     *  pause updates the highlight/flicker but doesn't auto-play until resumed). */
+    @Volatile private var paused = false
+    fun setPaused(on: Boolean) { synchronized(lock) { paused = on; lock.notifyAll() } }
+
     /** When non-null, [render] reads/writes a per-sentence disk cache under this book id, so
      *  re-listening and background pre-generation share byte-identical audio (see [TtsAudioCache]). */
     @Volatile var cacheBookId: String? = null
@@ -243,6 +253,8 @@ class OnDeviceTtsEngine(
         action: () -> Boolean,
     ): Int? {
         if (tts == null) return null
+        val pending: Boolean
+        val seq: Int
         synchronized(lock) {
             val existing = byLine[line]
             val idx = if (existing != null && !existing.cancelled) queue.indexOf(existing) else -1
@@ -273,8 +285,14 @@ class OnDeviceTtsEngine(
             }
             for (u in upcoming.take(lookahead)) if (byLine[u] == null) enqueueLocked(u)
             lock.notifyAll()
-            return item.seq
+            // `pending` = audio not ready yet (a skip beyond the rendered look-ahead).
+            pending = item.pcm == null && !item.failed
+            seq = item.seq
         }
+        // Report the target OUTSIDE the lock so the UI jumps the highlight there + flickers until
+        // audio starts (onAudibleLine then clears it). Callback just posts LiveData.
+        onLineTarget?.invoke(line, pending)
+        return seq
     }
 
     override suspend fun waitForOr(id: Int?, action: () -> Boolean, then: () -> Unit) {
@@ -391,6 +409,12 @@ class OnDeviceTtsEngine(
             // Wait until THIS sentence's audio is generated (or failed / cancelled).
             synchronized(lock) {
                 while (running && item.pcm == null && !item.failed && !item.cancelled) runCatching { lock.wait(100) }
+            }
+            if (!running) return
+            // Hold while locally paused: a skip during a pause updates the highlight (via speak ->
+            // onLineTarget) but must not auto-play until the user resumes. release() flips running.
+            synchronized(lock) {
+                while (running && paused && !item.cancelled) runCatching { lock.wait(100) }
             }
             if (!running) return
             // Clean up the raw model audio (de-clip / de-ess / normalize) right before playback.

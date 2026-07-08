@@ -588,6 +588,42 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     var lockBottom: Int? = null
     var currentScroll: Int = 0
 
+    private var ttsFlicker: android.animation.ValueAnimator? = null
+
+    /** The highlight text views currently on screen (RecyclerView rows). */
+    private fun visibleRoundedViews(): List<com.lagradost.quicknovel.ui.roundedbg.RoundedBgTextView> {
+        val out = ArrayList<com.lagradost.quicknovel.ui.roundedbg.RoundedBgTextView>()
+        fun collect(v: android.view.View) {
+            if (v is com.lagradost.quicknovel.ui.roundedbg.RoundedBgTextView) out.add(v)
+            else if (v is android.view.ViewGroup) for (i in 0 until v.childCount) collect(v.getChildAt(i))
+        }
+        for (i in 0 until binding.realText.childCount) collect(binding.realText.getChildAt(i))
+        return out
+    }
+
+    /** Pulse the highlighted line's background while its audio is still generating (a skip landed
+     *  beyond the ready look-ahead); steady once playback starts (ttsPending -> false). */
+    private fun updateTtsFlicker() {
+        val flicker = viewModel.ttsPending.value == true &&
+                viewModel.ttsStatus.value == TTSHelper.TTSStatus.IsRunning
+        if (flicker) {
+            if (ttsFlicker?.isRunning == true) return
+            ttsFlicker = android.animation.ValueAnimator.ofInt(255, 70).apply {
+                duration = 520
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                addUpdateListener { a ->
+                    val alpha = a.animatedValue as Int
+                    visibleRoundedViews().forEach { it.roundedBgAlpha = alpha }
+                }
+                start()
+            }
+        } else {
+            ttsFlicker?.cancel(); ttsFlicker = null
+            visibleRoundedViews().forEach { it.roundedBgAlpha = 255 }
+        }
+    }
+
     private fun updateTTSLine(line: TTSHelper.TTSLine?, depth: Int = 0) {
         // update the visual component
         /*println("LINE: ${line?.speakOutMsg} =>")
@@ -1064,8 +1100,10 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             true
         }*/
 
+        observe(viewModel.ttsPending) { updateTtsFlicker() }
         observe(viewModel.ttsStatus) { status ->
             val isTTSRunning = status != TTSHelper.TTSStatus.IsStopped
+            updateTtsFlicker()
 
             // Hide the novel title from the toolbar while read-aloud is active, restore it when stopped.
             isReadAloudActive = isTTSRunning

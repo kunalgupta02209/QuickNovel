@@ -51,11 +51,18 @@ class TextRoundedBgHelper(
     drawableRight: Drawable
 ) {
 
+    // Mutate so the TTS "audio generating" alpha flicker doesn't bleed into other views that share
+    // the same background drawable resource.
+    private val dSingle: Drawable = drawable.mutate()
+    private val dLeft: Drawable = drawableLeft.mutate()
+    private val dMid: Drawable = drawableMid.mutate()
+    private val dRight: Drawable = drawableRight.mutate()
+
     private val singleLineRenderer: TextRoundedBgRenderer by lazy {
         SingleLineRenderer(
             horizontalPadding = horizontalPadding,
             verticalPadding = verticalPadding,
-            drawable = drawable
+            drawable = dSingle
         )
     }
 
@@ -63,9 +70,9 @@ class TextRoundedBgHelper(
         MultiLineRenderer(
             horizontalPadding = horizontalPadding,
             verticalPadding = verticalPadding,
-            drawableLeft = drawableLeft,
-            drawableMid = drawableMid,
-            drawableRight = drawableRight
+            drawableLeft = dLeft,
+            drawableMid = dMid,
+            drawableRight = dRight
         )
     }
 
@@ -76,7 +83,10 @@ class TextRoundedBgHelper(
      * @param text
      * @param layout Layout that contains the text
      */
-    fun draw(canvas: Canvas, text: Spanned, layout: Layout) {
+    fun draw(canvas: Canvas, text: Spanned, layout: Layout, alpha: Int = 255) {
+        if (dSingle.alpha != alpha) {
+            dSingle.alpha = alpha; dLeft.alpha = alpha; dMid.alpha = alpha; dRight.alpha = alpha
+        }
         // ideally the calculations here should be cached since they are not cheap. However, proper
         // invalidation of the cache is required whenever anything related to text has changed.
         val spans = text.getSpans(0, text.length, Annotation::class.java)

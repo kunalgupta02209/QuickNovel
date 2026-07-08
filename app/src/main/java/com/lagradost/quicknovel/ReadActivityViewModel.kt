@@ -547,6 +547,11 @@ class ReadActivityViewModel : ViewModel() {
         MutableLiveData<TTSHelper.TTSLine?>(null)
     val ttsLine: LiveData<TTSHelper.TTSLine?> = _ttsLine
 
+    // true = the highlighted line's audio is still generating (skip beyond the ready look-ahead) —
+    // the reader flickers the highlight until playback starts.
+    private val _ttsPending = MutableLiveData(false)
+    val ttsPending: LiveData<Boolean> = _ttsPending
+
 
     /*  private val _orientation: MutableLiveData<OrientationType> =
           MutableLiveData<OrientationType>(null)
@@ -1383,7 +1388,12 @@ class ReadActivityViewModel : ViewModel() {
                     engine.updateDenoise(ttsDenoise)
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
+                        _ttsPending.postValue(false) // audio started -> stop the flicker
                         TTSNotifications.updateNowPlaying(current.speakOutMsg, next?.speakOutMsg, currentTTSStatus, context)
+                    }
+                    engine.onLineTarget = { line, pending ->
+                        _ttsLine.postValue(line)      // jump the highlight to the skip target now
+                        _ttsPending.postValue(pending) // flicker if its audio isn't ready yet
                     }
                 }
             } else {
@@ -1411,6 +1421,12 @@ class ReadActivityViewModel : ViewModel() {
 
             _ttsStatus.postValue(value)
             _currentTTSStatus = value
+            // F1: local pause gate so a skip while paused updates the highlight but doesn't auto-play.
+            (ttsSession as? OnDeviceTtsEngine)?.setPaused(value == TTSHelper.TTSStatus.IsPaused)
+            // F3: background pre-gen yields the CPU/model to the live engine while actually playing.
+            com.lagradost.quicknovel.tts.TtsPlaybackGate.setListening(
+                value == TTSHelper.TTSStatus.IsRunning && ttsSession is OnDeviceTtsEngine
+            )
         }
 
     fun stopTTS() {
@@ -1691,6 +1707,7 @@ class ReadActivityViewModel : ViewModel() {
             ttsSession.interruptTTS()
             ttsSession.unregister()
             _ttsLine.postValue(null)
+            _ttsPending.postValue(false)
             ttsTimeRemaining.postValue(null)
         }
     }

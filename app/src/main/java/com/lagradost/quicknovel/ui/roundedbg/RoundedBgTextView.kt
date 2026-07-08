@@ -50,11 +50,17 @@ class RoundedBgTextView// PREVENT OVERLAP, SUE ME
         )
     }
 
+    /** Alpha (0..255) of the highlight background — pulsed to flicker while TTS audio is generating. */
+    var roundedBgAlpha: Int = 255
+        set(value) {
+            if (field != value) { field = value; invalidate() }
+        }
+
     override fun onDraw(canvas: Canvas) {
         // need to draw bg first so that text can be on top during super.onDraw()
         if (text is Spanned && layout != null) {
             canvas.withTranslation(totalPaddingLeft.toFloat(), totalPaddingTop.toFloat()) {
-                textRoundedBgHelper.draw(canvas, text as Spanned, layout)
+                textRoundedBgHelper.draw(canvas, text as Spanned, layout, roundedBgAlpha)
             }
         }
         super.onDraw(canvas)
