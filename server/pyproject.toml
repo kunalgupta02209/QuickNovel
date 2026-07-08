@@ -11,6 +11,10 @@ dependencies = [
     "pyyaml==6.0.2",
     "watchfiles==1.0.3",
     "pydantic==2.10.4",
+    # Server-side TTS offload: same sherpa-onnx runtime + models as the Android app (Kitten/Kokoro).
+    # NOTE: needs a build recent enough to include the Kitten model config (2025.x+).
+    "sherpa-onnx==1.10.39",
+    "numpy>=1.26",
 ]
 
 # This is a run-only application (a FastAPI service + a CLI), not a distributable library,

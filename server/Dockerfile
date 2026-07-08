@@ -7,7 +7,9 @@ WORKDIR /app
 # and don't fetch a managed Python — use the image's 3.11.
 ENV UV_PROJECT_ENVIRONMENT=/opt/uvenv \
     UV_PYTHON_DOWNLOADS=never \
-    UV_COMPILE_BYTECODE=1
+    UV_COMPILE_BYTECODE=1 \
+    TTS_MODELS_DIR=/models \
+    TTS_AUDIO_DIR=/data/tts-audio
 
 # Install deps first (cached layer) from the lockfile.
 COPY pyproject.toml uv.lock ./

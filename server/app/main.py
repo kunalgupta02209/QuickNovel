@@ -4,15 +4,17 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from watchfiles import awatch
 
+from . import tts_engine, tts_storage
 from .config import CONFIG_PATH, config
 from .fixer import fix_text
 from .jobs import jobs
 from .logging_config import setup_logging
 from .prompts import PROMPT_PATH, prompts
+from .tts_jobs import tts_jobs
 
 setup_logging()
 log = logging.getLogger("main")
@@ -134,10 +136,112 @@ def cancel_job(jid: str):
     return j.summary()
 
 
+# ---- server-side TTS offload ----
+class TtsSentence(BaseModel):
+    key: str
+    text: str
+
+
+class TtsChapter(BaseModel):
+    index: int
+    sentences: list[TtsSentence]
+
+
+class TtsBatchReq(BaseModel):
+    book_id: str
+    model_id: str
+    sid: int = 0
+    sample_rate: int = 24000
+    items: list[TtsChapter]
+
+
+@app.get("/tts/health")
+def tts_health():
+    return {"ok": True}
+
+
+@app.get("/tts/models")
+def tts_models():
+    return {
+        "models": [
+            {"id": m.id, "kind": m.kind, "speakers": m.speakers,
+             "sample_rate": m.sample_rate, "ready": tts_engine.is_ready(m)}
+            for m in tts_engine.MODELS.values()
+        ],
+    }
+
+
+@app.post("/tts/batch")
+def tts_batch(req: TtsBatchReq):
+    """Submit a book's chapters for server-side synthesis; audio is fetched by book identity."""
+    defn = tts_engine.MODELS.get(req.model_id)
+    if defn is None:
+        raise HTTPException(400, f"unknown model {req.model_id}")
+    if req.sid < 0 or req.sid >= defn.speakers:
+        raise HTTPException(400, f"sid {req.sid} out of range for {req.model_id}")
+    if not req.items:
+        raise HTTPException(400, "no items")
+    job = tts_jobs.submit(
+        req.book_id, req.model_id, req.sid, req.sample_rate,
+        [i.model_dump() for i in req.items], config.tts_num_threads,
+    )
+    return {"job_id": job.id}
+
+
+@app.get("/tts/jobs")
+def tts_list_jobs():
+    return {"jobs": tts_jobs.list()}
+
+
+@app.get("/tts/jobs/{jid}")
+def tts_job_detail(jid: str):
+    j = tts_jobs.get(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.detail()
+
+
+@app.post("/tts/jobs/{jid}/cancel")
+def tts_cancel_job(jid: str):
+    j = tts_jobs.cancel(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.summary()
+
+
+@app.get("/tts/audio/{book_id}/{model_id}/{sid}/{index}/manifest")
+def tts_manifest(book_id: str, model_id: str, sid: int, index: int):
+    return {"keys": tts_storage.chapter_keys(book_id, model_id, sid, index),
+            "count": len(tts_storage.chapter_keys(book_id, model_id, sid, index))}
+
+
+@app.get("/tts/audio/{book_id}/{model_id}/{sid}/{index}/{key}.wav")
+def tts_audio_one(book_id: str, model_id: str, sid: int, index: int, key: str):
+    path = tts_storage.wav_path(book_id, model_id, sid, index, key)
+    if not path.exists():
+        raise HTTPException(404, "not generated")
+    return FileResponse(str(path), media_type="audio/wav")
+
+
+@app.get("/tts/audio/{book_id}/{model_id}/{sid}/{index}.zip")
+def tts_audio_zip(book_id: str, model_id: str, sid: int, index: int):
+    if not tts_storage.has_any(book_id, model_id, sid, index):
+        raise HTTPException(404, "chapter not ready")
+    data = tts_storage.zip_chapter(book_id, model_id, sid, index)
+    return Response(content=data, media_type="application/zip")
+
+
 # ---- hot-reload watcher for the prompt .md and config.yaml (points 5 + 9) ----
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(_watch())
+    # Size the TTS synthesis semaphore + optionally pre-provision models (download only, no engine).
+    from .tts_jobs import configure as _tts_configure
+    _tts_configure(config.tts_max_concurrent)
+    for mid in config.tts_preload:
+        defn = tts_engine.MODELS.get(mid)
+        if defn is not None and not tts_engine.is_ready(defn):
+            asyncio.create_task(asyncio.to_thread(tts_engine.ensure_model, defn))
     log.info("server ready — default model %s", config.default_model)
 
 

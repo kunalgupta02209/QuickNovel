@@ -76,6 +76,23 @@ class Config:
             "presence_penalty": float(self.get("presence_penalty", 0.1)),
         }
 
+    # ---- server-side TTS offload ----
+    @property
+    def tts(self) -> dict:
+        return self.get("tts", {}) or {}
+
+    @property
+    def tts_num_threads(self) -> int:
+        return int(self.tts.get("num_threads", 4))
+
+    @property
+    def tts_max_concurrent(self) -> int:
+        return int(self.tts.get("max_concurrent", 2))
+
+    @property
+    def tts_preload(self) -> list:
+        return self.tts.get("preload", []) or []
+
     def litellm_for(self, model_id):
         for m in self.models:
             if m.get("id") == model_id:

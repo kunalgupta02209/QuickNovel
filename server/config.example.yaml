@@ -54,3 +54,15 @@ models:
   # - id: "gpt-4o-mini"
   #   name: "GPT-4o mini"
   #   litellm: "openai/gpt-4o-mini"
+
+# Server-side TTS offload (GET/POST /tts/*). Synthesizes the SAME sherpa-onnx models as the app
+# (Kitten/Kokoro) so the audio drops straight into the app's on-device cache in the same voice.
+tts:
+  enabled: true
+  # Where downloaded models + generated audio live (also overridable via TTS_MODELS_DIR / TTS_AUDIO_DIR).
+  models_dir: "/models"
+  audio_dir: "/data/tts-audio"
+  provider: "cpu"          # CPU matches on-device + avoids VRAM contention with the LLM. "cuda" opt-in.
+  num_threads: 4           # ONNX threads per synthesis
+  max_concurrent: 2        # parallel sentence syntheses (drop to 1 on a shared GPU)
+  preload: ["kitten"]      # pre-download these models on startup (download only; engine loads lazily)

@@ -12,6 +12,9 @@ services:
     volumes:
       # Mount the WHOLE app dir so code + prompt + config changes hot-reload (point 7).
       - ./:/app
+      # Persist downloaded TTS models + generated audio across restarts.
+      - tts-models:/models
+      - tts-audio:/data/tts-audio
     environment:
       - LOG_LEVEL=INFO
       - LITELLM_LOG=WARNING
@@ -38,5 +41,7 @@ services:
   #             count: all
   #             capabilities: [gpu]
 
-# volumes:
+volumes:
+  tts-models:
+  tts-audio:
 #   ollama:
