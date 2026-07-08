@@ -105,11 +105,9 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             }
     }
 
-    // The chrome holders stay VISIBLE and just translate off-screen. Toggling isVisible GONE/VISIBLE
-    // forced a FrameLayout relayout (a measure pass over the RecyclerView) on every tap — the ~14 ms
-    // hitch that made the app bar toggle feel laggy. Translation-only is transform-only (no layout).
+    // Tap only slides the app chrome (system bars are hidden once in onCreate). The holders stay
+    // VISIBLE and translate off-screen — transform-only, no FrameLayout relayout (the tap hitch).
     private fun hideSystemUI() {
-        insetsController?.hide(WindowInsetsCompat.Type.systemBars())
         binding.readerBottomViewHolder.animate()
             .translationY(binding.readerBottomViewHolder.height.toFloat()).setDuration(TOGGLE_MS).start()
         binding.readToolbarHolder.animate()
@@ -117,7 +115,10 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
     }
 
     private fun showSystemUI() {
-        insetsController?.show(WindowInsetsCompat.Type.systemBars())
+        // The holders are GONE in XML initially -> make them VISIBLE on show (idempotent afterwards,
+        // so later toggles stay relayout-free), then slide in.
+        binding.readToolbarHolder.visibility = View.VISIBLE
+        binding.readerBottomViewHolder.visibility = View.VISIBLE
         binding.readerBottomViewHolder.animate().translationY(0f).setDuration(TOGGLE_MS).start()
         binding.readToolbarHolder.animate().translationY(0f).setDuration(TOGGLE_MS).start()
     }
@@ -940,6 +941,9 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         insetsController = WindowInsetsControllerCompat(window, binding.readerContainer).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        // Decoupled: hide the system bars ONCE (fullscreen reading; swipe an edge to peek). The
+        // content tap no longer toggles them, so it can't trigger their slow inset relayout/animation.
+        insetsController?.hide(WindowInsetsCompat.Type.systemBars())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
