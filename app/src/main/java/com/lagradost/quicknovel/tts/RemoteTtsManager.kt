@@ -185,6 +185,12 @@ object RemoteTtsManager {
         }
     }
 
+    // Chapters per submit cycle. A 1219-chapter book built + submitted as ONE batch spent 10+ silent
+    // minutes parsing every chapter on the phone and then had to upload a tens-of-MB JSON body — the
+    // "stuck at 0/N, job …" symptom. Slices keep each build+POST seconds-sized, deliver audio for the
+    // first chapters within minutes, and emit visible progress between slices.
+    private const val SLICE_CHAPTERS = 25
+
     suspend fun runJob(context: Context, req: RemoteTtsRequest) {
         val key = req.key
         synchronized(lock) { if (!currentJobs.add(key)) return; stopRequested.remove(key) }
@@ -195,110 +201,116 @@ object RemoteTtsManager {
         val total = req.rangeEnd - req.rangeStart + 1
         emitProgress(RemoteProgress(key, "building", null, 0, total))
         var lastStatus = "failed" // overwritten on success paths; the finally emits the terminal state
+        var doneCount = 0
         try {
-            // 1) Build the work-list: only chapters with uncached sentences (skip .done + on-disk WAVs).
-            val chapters = ArrayList<RemoteTtsClient.ChapterReq>()
-            var alreadyDone = 0
-            for (index in req.rangeStart..req.rangeEnd) {
-                if (shouldStop(key)) return
-                if (TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) { alreadyDone++; continue }
-                val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes, bookIdStr) ?: continue
-                val sentences = lines
-                    .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
-                    .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
-                // The prepended title line (startChar==endChar==0) doubles as the chapter's display name.
-                val chapterName = lines.firstOrNull()
-                    ?.takeIf { it.startChar == 0 && it.endChar == 0 }?.speakOutMsg ?: "Chapter ${index + 1}"
-                if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences, chapterName))
-            }
-            if (chapters.isEmpty()) {
-                lastStatus = "done"
-                RemoteTtsNotifications.update(ctx, req, total, total, finished = true)
-                return
-            }
+            var sliceStart = req.rangeStart
+            while (sliceStart <= req.rangeEnd) {
+                val sliceEnd = minOf(sliceStart + SLICE_CHAPTERS - 1, req.rangeEnd)
 
-            // 2) Resume a still-live server job, else submit a fresh one.
-            val prevJobId = getKey<String>(TTS_REMOTE_FOLDER, key)
-            var jobId = prevJobId?.takeIf {
-                RemoteTtsClient.getJob(req.serverUrl, it)?.status in setOf("running", "queued")
-            }
-            if (jobId == null) {
-                val (devId, devName) = com.lagradost.quicknovel.telemetry.TelemetryManager.deviceIdentity(ctx)
-                jobId = RemoteTtsClient.submitBatch(
-                    req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters,
-                    bookName = req.name, deviceId = devId, deviceName = devName,
-                    apiName = req.apiName, author = req.author ?: "",
-                ) ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
-            }
-            runCatching { setKey(TTS_REMOTE_FOLDER, key, jobId) }
-            android.util.Log.i(TAG, "server job $jobId for key=$key (${chapters.size} chapters to sync)")
-            emitProgress(RemoteProgress(key, "polling", jobId, alreadyDone, total))
-
-            // 3) Poll + pull each ready chapter's audio into the cache.
-            val fetched = HashSet<Int>()
-            var pollFailures = 0
-            while (true) {
-                if (shouldStop(key)) {
-                    lastStatus = "stopped"
-                    RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                // 1) Work-list for THIS slice only (skip .done chapters + on-disk WAVs).
+                val chapters = ArrayList<RemoteTtsClient.ChapterReq>()
+                for (index in sliceStart..sliceEnd) {
+                    if (shouldStop(key)) { lastStatus = "stopped"; return }
+                    if (TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) { doneCount++; continue }
+                    val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes, bookIdStr) ?: continue
+                    val sentences = lines
+                        .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
+                        .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
+                    // The prepended title line (startChar==endChar==0) doubles as the chapter's display name.
+                    val chapterName = lines.firstOrNull()
+                        ?.takeIf { it.startChar == 0 && it.endChar == 0 }?.speakOutMsg ?: "Chapter ${index + 1}"
+                    if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences, chapterName))
+                    else { doneCount++; TtsAudioCache.markChapterDone(ctx, bookIdStr, def.id, req.sid, index) }
                 }
-                if (consumeAction(key) == com.lagradost.quicknovel.DownloadActionType.Pause) {
-                    // Pause the SERVER job too (stops burning its CPU), then idle until resume/stop.
-                    RemoteTtsClient.pauseJob(req.serverUrl, jobId)
-                    emitProgress(RemoteProgress(key, "paused", jobId, alreadyDone + fetched.size, total))
-                    pauseWait@ while (true) {
-                        delay(500)
-                        when (consumeAction(key)) {
-                            com.lagradost.quicknovel.DownloadActionType.Resume -> {
-                                RemoteTtsClient.resumeJob(req.serverUrl, jobId)
-                                emitProgress(RemoteProgress(key, "polling", jobId, alreadyDone + fetched.size, total))
-                                break@pauseWait
-                            }
-                            com.lagradost.quicknovel.DownloadActionType.Stop -> {
-                                lastStatus = "stopped"
-                                RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
-                            }
-                            else -> if (shouldStop(key)) {
-                                lastStatus = "stopped"
-                                RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                sliceStart = sliceEnd + 1
+                emitProgress(RemoteProgress(key, "building", null, doneCount, total))
+                if (chapters.isEmpty()) continue // slice fully cached/undownloaded -> next slice
+
+                // 2) Resume a still-live server job, else submit THIS slice.
+                val prevJobId = getKey<String>(TTS_REMOTE_FOLDER, key)
+                var jobId = prevJobId?.takeIf {
+                    RemoteTtsClient.getJob(req.serverUrl, it)?.status in setOf("running", "queued")
+                }
+                if (jobId == null) {
+                    val (devId, devName) = com.lagradost.quicknovel.telemetry.TelemetryManager.deviceIdentity(ctx)
+                    jobId = RemoteTtsClient.submitBatch(
+                        req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters,
+                        bookName = req.name, deviceId = devId, deviceName = devName,
+                        apiName = req.apiName, author = req.author ?: "",
+                    ) ?: return // unreachable/failed -> WorkManager result is success; re-open re-triggers
+                }
+                runCatching { setKey(TTS_REMOTE_FOLDER, key, jobId) }
+                android.util.Log.i(TAG, "server job $jobId for key=$key (slice ${chapters.size} ch, $doneCount/$total done)")
+                emitProgress(RemoteProgress(key, "polling", jobId, doneCount, total))
+
+                // 3) Poll + pull each ready chapter of this slice into the cache.
+                val fetched = HashSet<Int>()
+                var pollFailures = 0
+                pollLoop@ while (true) {
+                    if (shouldStop(key)) {
+                        lastStatus = "stopped"
+                        RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                    }
+                    if (consumeAction(key) == com.lagradost.quicknovel.DownloadActionType.Pause) {
+                        // Pause the SERVER job too (stops burning its CPU), then idle until resume/stop.
+                        RemoteTtsClient.pauseJob(req.serverUrl, jobId)
+                        emitProgress(RemoteProgress(key, "paused", jobId, doneCount + fetched.size, total))
+                        pauseWait@ while (true) {
+                            delay(500)
+                            when (consumeAction(key)) {
+                                com.lagradost.quicknovel.DownloadActionType.Resume -> {
+                                    RemoteTtsClient.resumeJob(req.serverUrl, jobId)
+                                    emitProgress(RemoteProgress(key, "polling", jobId, doneCount + fetched.size, total))
+                                    break@pauseWait
+                                }
+                                com.lagradost.quicknovel.DownloadActionType.Stop -> {
+                                    lastStatus = "stopped"
+                                    RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                                }
+                                else -> if (shouldStop(key)) {
+                                    lastStatus = "stopped"
+                                    RemoteTtsClient.cancelJob(req.serverUrl, jobId); return
+                                }
                             }
                         }
                     }
-                }
-                val job = RemoteTtsClient.getJob(req.serverUrl, jobId)
-                if (job == null) {
-                    // Distinguish a network blip (retry, keep the persisted jobId so we resume)
-                    // from the job being GONE on a reachable server (e.g. --reload wiped it):
-                    // then drop the stale id so the next trigger resubmits the uncached remainder.
-                    pollFailures++
-                    if (pollFailures < 5) { delay(5000); continue }
-                    if (RemoteTtsClient.reachable(req.serverUrl)) {
-                        android.util.Log.w(TAG, "job $jobId gone on reachable server; clearing for resubmit (key=$key)")
-                        runCatching { removeKey(TTS_REMOTE_FOLDER, key) }
-                    } else {
-                        android.util.Log.w(TAG, "server unreachable after $pollFailures polls; keeping jobId for resume (key=$key)")
+                    val job = RemoteTtsClient.getJob(req.serverUrl, jobId)
+                    if (job == null) {
+                        // Distinguish a network blip (retry, keep the persisted jobId so we resume)
+                        // from the job being GONE on a reachable server (e.g. --reload wiped it):
+                        // then drop the stale id so the next trigger resubmits the uncached remainder.
+                        pollFailures++
+                        if (pollFailures < 5) { delay(5000); continue }
+                        if (RemoteTtsClient.reachable(req.serverUrl)) {
+                            android.util.Log.w(TAG, "job $jobId gone on reachable server; clearing for resubmit (key=$key)")
+                            runCatching { removeKey(TTS_REMOTE_FOLDER, key) }
+                        } else {
+                            android.util.Log.w(TAG, "server unreachable after $pollFailures polls; keeping jobId for resume (key=$key)")
+                        }
+                        return
                     }
-                    return
-                }
-                pollFailures = 0
-                for (idx in job.readyChapters) {
-                    if (idx in fetched) continue
-                    if (fetchChapter(ctx, req, def, idx)) {
-                        TtsAudioCache.markChapterDone(ctx, bookIdStr, def.id, req.sid, idx)
-                        fetched.add(idx)
-                        RemoteTtsNotifications.update(ctx, req, alreadyDone + fetched.size, total, finished = false)
-                        emitProgress(RemoteProgress(key, "polling", jobId, alreadyDone + fetched.size, total))
+                    pollFailures = 0
+                    for (idx in job.readyChapters) {
+                        if (idx in fetched) continue
+                        if (fetchChapter(ctx, req, def, idx)) {
+                            TtsAudioCache.markChapterDone(ctx, bookIdStr, def.id, req.sid, idx)
+                            fetched.add(idx)
+                            RemoteTtsNotifications.update(ctx, req, doneCount + fetched.size, total, finished = false)
+                            emitProgress(RemoteProgress(key, "polling", jobId, doneCount + fetched.size, total))
+                        }
+                    }
+                    when (job.status) {
+                        "done" -> break@pollLoop
+                        "error", "cancelled" -> break@pollLoop
+                        else -> delay(2000)
                     }
                 }
-                when (job.status) {
-                    "done" -> break
-                    "error", "cancelled" -> break
-                    else -> delay(2000)
-                }
+                doneCount += fetched.size
+                runCatching { removeKey(TTS_REMOTE_FOLDER, key) } // slice complete; next slice = fresh job
+                RemoteTtsNotifications.update(ctx, req, doneCount, total, finished = false)
             }
             lastStatus = "done"
-            runCatching { removeKey(TTS_REMOTE_FOLDER, key) }
-            RemoteTtsNotifications.update(ctx, req, alreadyDone + fetched.size, total, finished = true)
+            RemoteTtsNotifications.update(ctx, req, doneCount, total, finished = true)
         } catch (t: Throwable) {
             logError(t)
         } finally {
