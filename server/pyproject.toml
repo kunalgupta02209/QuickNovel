@@ -12,8 +12,8 @@ dependencies = [
     "watchfiles==1.0.3",
     "pydantic==2.10.4",
     # Server-side TTS offload: same sherpa-onnx runtime + models as the Android app (Kitten/Kokoro).
-    # NOTE: needs a build recent enough to include the Kitten model config (2025.x+).
-    "sherpa-onnx==1.10.39",
+    # 1.12.x+ includes the Kitten model config; 1.13.4 is current.
+    "sherpa-onnx==1.13.4",
     "numpy>=1.26",
 ]
 

@@ -213,5 +213,5 @@ def synth_wav(model_id: str, sid: int, text: str, num_threads: int) -> bytes:
     if sid < 0 or sid >= defn.speakers:
         raise ValueError(f"sid {sid} out of range for {model_id} (0..{defn.speakers - 1})")
     eng = get_engine(defn, num_threads)
-    audio = eng.generate(text=text, sid=sid, speed=1.0)
+    audio = eng.generate(text, sid=sid, speed=1.0)  # text is positional (pybind builtin)
     return to_wav_bytes(audio.samples, audio.sample_rate, trim=True)
