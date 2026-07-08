@@ -1165,6 +1165,11 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
 
         observe(viewModel.ttsPending) { updatePulse() }
         observe(viewModel.ttsGenerating) { updateGenerating(it) }
+        observe(viewModel.promptModelDownload) { prompt ->
+            // No on-device voice downloaded on a play attempt -> open the read-aloud sheet (model
+            // picker + download) so the user can pick one.
+            if (prompt) { viewModel.consumeModelPrompt(); showTtsSettingsDialog() }
+        }
         observe(viewModel.ttsStatus) { status ->
             val isTTSRunning = status != TTSHelper.TTSStatus.IsStopped
             updatePulse()

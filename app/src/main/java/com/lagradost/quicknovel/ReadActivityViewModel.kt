@@ -553,6 +553,16 @@ class ReadActivityViewModel : ViewModel() {
     private val _ttsPending = MutableLiveData(false)
     val ttsPending: LiveData<Boolean> = _ttsPending
 
+    // One-off: play was requested with on-device TTS selected but no voice downloaded (and thus no
+    // way to synthesize or play cached audio) -> the reader opens the voice picker to prompt a choice.
+    private val _promptModelDownload = MutableLiveData(false)
+    val promptModelDownload: LiveData<Boolean> = _promptModelDownload
+    fun consumeModelPrompt() { _promptModelDownload.value = false }
+
+    private fun onDeviceModelReady(): Boolean = context?.let {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && modelDownloads(it).isReady(ttsOnDeviceModel)
+    } ?: false
+
     // Sentences currently being synthesized in the background (drives the reader's "generating"
     // pulsating underline). The global tracker is filtered to the active book/voice scope.
     private val _ttsCacheScope = MutableLiveData<Triple<String, String, Int>?>(null) // (bookId, modelId, sid)
@@ -1457,6 +1467,12 @@ class ReadActivityViewModel : ViewModel() {
         set(value) = synchronized(this@ReadActivityViewModel) {
             playDummySound()
             if (_currentTTSStatus == TTSHelper.TTSStatus.IsStopped && value == TTSHelper.TTSStatus.IsRunning) {
+                // On-device selected but no voice downloaded: server audio (if any) can't play without
+                // an engine either -> prompt the user to pick/download a voice instead of silently
+                // falling back to system TTS.
+                if (ttsEngineType == TtsEngineType.ON_DEVICE && !onDeviceModelReady()) {
+                    _promptModelDownload.postValue(true)
+                }
                 startTTSWorker()
             }
 
