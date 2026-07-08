@@ -1170,15 +1170,31 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         }
 
         binding.apply {
-            realText.setOnClickListener {
-                viewModel.switchVisibility()
-            }
-            readToolbar.setOnClickListener {
-                viewModel.switchVisibility()
-            }
-            readerLinContainer.setOnClickListener {
-                viewModel.switchVisibility()
-            }
+            // Rebuilt tap-to-toggle: a plain setOnClickListener on the RecyclerView is unreliable —
+            // rows (TextViews with link movement methods) swallow the touch, so the click often never
+            // fires ("unresponsive"). An OnItemTouchListener sees EVERY touch before the rows do; a
+            // GestureDetector turns real taps (not scrolls/flings) into an immediate toggle on tap-up,
+            // while returning false so scrolling and link taps still work.
+            val tapDetector = android.view.GestureDetector(
+                this@ReadActivity2,
+                object : android.view.GestureDetector.SimpleOnGestureListener() {
+                    override fun onSingleTapUp(e: android.view.MotionEvent): Boolean {
+                        viewModel.switchVisibility()
+                        return true
+                    }
+                }
+            )
+            realText.addOnItemTouchListener(object :
+                androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
+                override fun onInterceptTouchEvent(
+                    rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent
+                ): Boolean {
+                    tapDetector.onTouchEvent(e)
+                    return false // observe only; never intercept scroll/child touches
+                }
+            })
+            readToolbar.setOnClickListener { viewModel.switchVisibility() }
+            readerLinContainer.setOnClickListener { viewModel.switchVisibility() }
         }
 
         observe(viewModel.bottomVisibility) { visibility ->
