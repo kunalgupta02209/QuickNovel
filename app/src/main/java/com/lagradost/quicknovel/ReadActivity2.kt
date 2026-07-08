@@ -1170,27 +1170,35 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         }
 
         binding.apply {
-            // Rebuilt tap-to-toggle: a plain setOnClickListener on the RecyclerView is unreliable —
-            // rows (TextViews with link movement methods) swallow the touch, so the click often never
-            // fires ("unresponsive"). An OnItemTouchListener sees EVERY touch before the rows do; a
-            // GestureDetector turns real taps (not scrolls/flings) into an immediate toggle on tap-up,
-            // while returning false so scrolling and link taps still work.
-            val tapDetector = android.view.GestureDetector(
-                this@ReadActivity2,
-                object : android.view.GestureDetector.SimpleOnGestureListener() {
-                    override fun onSingleTapUp(e: android.view.MotionEvent): Boolean {
-                        viewModel.switchVisibility()
-                        return true
-                    }
-                }
-            )
+            // Tap-to-toggle detected at the RecyclerView level (rows' link movement methods can't
+            // swallow it). Manual + GENEROUS: a tap = a short press (<350ms) with small movement
+            // (2x touch slop) while the list isn't scrolling. The strict GestureDetector was
+            // classifying a tiny finger movement as a scroll and dropping the tap ("tap multiple
+            // times"). Returns false so scrolling and link taps still work.
+            val tapSlop = android.view.ViewConfiguration.get(this@ReadActivity2).scaledTouchSlop * 2f
             realText.addOnItemTouchListener(object :
                 androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
+                private var downX = 0f
+                private var downY = 0f
+                private var downTime = 0L
+                private var wasScrolling = false
                 override fun onInterceptTouchEvent(
                     rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent
                 ): Boolean {
-                    tapDetector.onTouchEvent(e)
-                    return false // observe only; never intercept scroll/child touches
+                    when (e.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> {
+                            downX = e.x; downY = e.y; downTime = e.eventTime
+                            wasScrolling =
+                                rv.scrollState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            val moved = kotlin.math.hypot(e.x - downX, e.y - downY)
+                            if (!wasScrolling && moved < tapSlop && e.eventTime - downTime < 350) {
+                                viewModel.switchVisibility()
+                            }
+                        }
+                    }
+                    return false // observe only; scroll + link taps still work
                 }
             })
             readToolbar.setOnClickListener { viewModel.switchVisibility() }
