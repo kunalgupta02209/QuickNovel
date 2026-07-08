@@ -1396,6 +1396,9 @@ class ReadActivityViewModel : ViewModel() {
         }
     }
 
+    // @Volatile: incremented on the main thread (skip taps), read/reset on the TTS coroutine —
+    // without it rapid taps could be missed (only 1 of N skips registering).
+    @Volatile
     private var pendingTTSSkip: Int = 0
     private var _currentTTSStatus: TTSHelper.TTSStatus = TTSHelper.TTSStatus.IsStopped
     var currentTTSStatus: TTSHelper.TTSStatus

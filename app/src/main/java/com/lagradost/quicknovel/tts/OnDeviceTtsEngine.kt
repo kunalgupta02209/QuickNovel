@@ -244,11 +244,29 @@ class OnDeviceTtsEngine(
     ): Int? {
         if (tts == null) return null
         synchronized(lock) {
-            var item = byLine[line]
-            if (item == null || item.cancelled) {
-                // Genuine discontinuity (fresh start, or a skip target after interruptTTS cleared the
-                // segment). Never happens during normal sequential play — the line was enqueued as a
-                // prior look-ahead, so it is always found and we just catch up.
+            val existing = byLine[line]
+            val idx = if (existing != null && !existing.cancelled) queue.indexOf(existing) else -1
+            val item: Item
+            if (idx >= 0) {
+                // Target is already in the pre-synthesized window (e.g. a skip landing on a look-ahead
+                // sentence). Jump the play cursor straight to it — its audio is ready, so it plays with
+                // no re-synthesis gap. Cancel the sentences we skipped over and flush the current audio.
+                if (idx != playPos) {
+                    if (idx > playPos) {
+                        // forward skip: drop the sentences we jump over
+                        for (i in playPos until idx) queue.getOrNull(i)?.let { it.cancelled = true }
+                    } else {
+                        // backward skip: replay from the target, so un-cancel up to the old cursor
+                        for (i in idx until playPos) queue.getOrNull(i)?.let { it.cancelled = false }
+                    }
+                    playPos = idx
+                    flushTrack()
+                }
+                val target = existing!!
+                target.cancelled = false
+                item = target
+            } else {
+                // Fresh start, or a jump beyond the synthesized window — rebuild the segment.
                 clearSegmentLocked()
                 item = enqueueLocked(line)
                 flushTrack()
@@ -264,7 +282,11 @@ class OnDeviceTtsEngine(
         while (id > endSeq) {
             delay(50)
             if (action()) {
-                interruptTTS()
+                // Stop the current audio but KEEP the pre-synthesized look-ahead: the next speak()
+                // either jumps the cursor to the (already synthesized) skip target — instant, no gap —
+                // or rebuilds the segment. interruptTTS() here would wipe the look-ahead and force a
+                // re-synthesis on every skip. Stop still clears the segment in the loop's finally.
+                flushTrack()
                 then()
                 break
             }
