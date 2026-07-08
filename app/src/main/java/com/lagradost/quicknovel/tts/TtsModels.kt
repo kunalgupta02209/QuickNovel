@@ -135,6 +135,9 @@ object TtsModels {
     /** ONNX inference threads. More threads = faster synthesis on multi-core phones. */
     private val inferenceThreads: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
 
+    /** The default per-engine ONNX thread count (exposed so a multi-worker pool can divide cores). */
+    val defaultInferenceThreads: Int get() = inferenceThreads
+
     private val downloadClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
@@ -152,7 +155,7 @@ object TtsModels {
     // Config resolution (per model kind)
     // ---------------------------------------------------------------------------------------------
 
-    fun resolveConfig(context: Context, def: ModelDef): OfflineTtsConfig? {
+    fun resolveConfig(context: Context, def: ModelDef, numThreads: Int = inferenceThreads): OfflineTtsConfig? {
         val dir = modelDir(context, def)
         if (!dir.isDirectory) return null
         fun p(name: String): String = File(dir, name).absolutePath
@@ -169,7 +172,7 @@ object TtsModels {
                             tokens = p("tokens.txt"),
                             dataDir = p("espeak-ng-data"),
                         ),
-                        numThreads = inferenceThreads, provider = "cpu",
+                        numThreads = numThreads, provider = "cpu",
                     ),
                 )
             }
@@ -183,7 +186,7 @@ object TtsModels {
                             tokens = p("tokens.txt"),
                             dataDir = p("espeak-ng-data"),
                         ),
-                        numThreads = inferenceThreads, provider = "cpu",
+                        numThreads = numThreads, provider = "cpu",
                     ),
                 )
             }
@@ -200,7 +203,7 @@ object TtsModels {
                             unicodeIndexer = p("unicode_indexer.bin"),
                             voiceStyle = p("voice.bin"),
                         ),
-                        numThreads = inferenceThreads, provider = "cpu",
+                        numThreads = numThreads, provider = "cpu",
                     ),
                 )
             }
@@ -218,7 +221,7 @@ object TtsModels {
                             dataDir = p("espeak-ng-data"),
                             lexicon = p("lexicon.txt"),
                         ),
-                        numThreads = inferenceThreads, provider = "cpu",
+                        numThreads = numThreads, provider = "cpu",
                     ),
                 )
             }

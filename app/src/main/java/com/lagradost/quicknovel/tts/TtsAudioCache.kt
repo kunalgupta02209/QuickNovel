@@ -108,7 +108,9 @@ object TtsAudioCache {
         bb.putInt(sampleRate * 2); bb.putShort(2); bb.putShort(16)
         bb.put("data".toByteArray(Charsets.US_ASCII)); bb.putInt(dataSize)
         for (s in trimmed) bb.putShort((s.coerceIn(-1f, 1f) * 32767f).toInt().toShort())
-        val tmp = File(dest.parentFile, dest.name + ".part")
+        // Unique temp name: multiple pool worker threads (and the live engine) may write the same
+        // sentence concurrently; a fixed ".part" would collide. Last writer wins (bytes identical).
+        val tmp = File(dest.parentFile, "${dest.name}.${Thread.currentThread().id}.${System.nanoTime()}.part")
         FileOutputStream(tmp).use { it.write(bb.array()) }
         tmp.renameTo(dest) // atomic-ish: never leave a half-written .wav
     }.getOrElse { logError(it); false }

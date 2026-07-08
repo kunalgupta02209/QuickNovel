@@ -33,8 +33,8 @@ class TtsChapterSynthesizer(
         .usePlugin(SoftBreakAddsNewLinePlugin.create())
         .build()
 
-    fun open(): Boolean {
-        val config = TtsModels.resolveConfig(context, def) ?: return false
+    fun open(numThreads: Int = TtsModels.defaultInferenceThreads): Boolean {
+        val config = TtsModels.resolveConfig(context, def, numThreads) ?: return false
         return try {
             val t = OfflineTts(assetManager = null, config = config)
             sampleRate = t.sampleRate()
@@ -55,31 +55,23 @@ class TtsChapterSynthesizer(
      * @return number of sentences in the chapter (>=0), 0 if the chapter isn't downloaded, or -1 on
      *         failure / stop. Sentences already on disk are skipped (resume-friendly).
      */
-    fun synthChapter(
-        apiName: String,
-        author: String?,
-        name: String,
-        chapterIndex: Int,
-        authorNotes: Boolean,
-        onProgress: (done: Int, total: Int) -> Unit,
+    /**
+     * Synthesize a batch of [lines] into the cache (default voice); already-cached sentences are
+     * skipped. [awaitResume] runs before each sentence to yield to the live reader engine;
+     * [shouldStop] aborts (the native generate stops cleanly the moment the sink returns 0).
+     * @return sentences processed (>=0), or -1 on stop / failure.
+     */
+    fun synthLines(
+        lines: List<TTSHelper.TTSLine>,
         shouldStop: () -> Boolean,
+        awaitResume: () -> Unit = {},
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Int {
         val engine = tts ?: return -1
-        val loaded = context.readDownloadedChapter(apiName, author, name, chapterIndex) ?: return 0
-
-        val rawText = TTSHelper.preParseHtml(loaded.html, authorNotes)
-        val rendered = TTSHelper.render(rawText, markwon)
-        val lines = TTSHelper.ttsParseText(rendered.substring(0, rendered.length), chapterIndex)
-        // Prepend the chapter title line exactly as LiveChapterData.ttsLines does.
-        val spokenTitle = loaded.title.trim()
-        if (spokenTitle.isNotBlank()) {
-            lines.add(0, TTSHelper.TTSLine(spokenTitle, startChar = 0, endChar = 0, index = chapterIndex))
-        }
-
-        val total = lines.size
         val gen = TtsModels.resolveGenerationConfig(context, def, sid, 1.0f)
         var done = 0
         for (line in lines) {
+            awaitResume()
             if (shouldStop()) return -1
             val f = TtsAudioCache.fileFor(context, bookId, def.id, sid, line)
             if (!f.exists()) {
@@ -104,9 +96,38 @@ class TtsChapterSynthesizer(
                 TtsAudioCache.save(f, TtsAudioCache.trimSilence(raw), sampleRate)
             }
             done++
-            onProgress(done, total)
+            onProgress(done, lines.size)
         }
-        TtsAudioCache.markChapterDone(context, bookId, def.id, sid, chapterIndex)
         return done
+    }
+
+    /**
+     * Synthesize every not-yet-cached sentence of one downloaded chapter into the cache.
+     * @return number of sentences (>=0), 0 if the chapter isn't downloaded, or -1 on failure / stop.
+     */
+    fun synthChapter(
+        apiName: String,
+        author: String?,
+        name: String,
+        chapterIndex: Int,
+        authorNotes: Boolean,
+        onProgress: (done: Int, total: Int) -> Unit,
+        shouldStop: () -> Boolean,
+        awaitResume: () -> Unit = {},
+    ): Int {
+        if (tts == null) return -1
+        val loaded = context.readDownloadedChapter(apiName, author, name, chapterIndex) ?: return 0
+
+        val rawText = TTSHelper.preParseHtml(loaded.html, authorNotes)
+        val rendered = TTSHelper.render(rawText, markwon)
+        val lines = TTSHelper.ttsParseText(rendered.substring(0, rendered.length), chapterIndex)
+        // Prepend the chapter title line exactly as LiveChapterData.ttsLines does.
+        val spokenTitle = loaded.title.trim()
+        if (spokenTitle.isNotBlank()) {
+            lines.add(0, TTSHelper.TTSLine(spokenTitle, startChar = 0, endChar = 0, index = chapterIndex))
+        }
+        return synthLines(lines, shouldStop, awaitResume, onProgress).also {
+            if (it >= 0) TtsAudioCache.markChapterDone(context, bookId, def.id, sid, chapterIndex)
+        }
     }
 }
