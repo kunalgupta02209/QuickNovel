@@ -153,6 +153,7 @@ object RemoteTtsManager {
 
         if (req.serverUrl.isNotBlank() && RemoteTtsClient.reachable(req.serverUrl)) {
             android.util.Log.i(TAG, "onBookReady -> SERVER queue key=$key url=${req.serverUrl}")
+            com.lagradost.quicknovel.CommonActivity.showToast(com.lagradost.quicknovel.R.string.sent_tts_to_server)
             com.lagradost.quicknovel.RemoteTtsWorkManager.enqueue(ctx, req) // server-offloaded
         } else {
             android.util.Log.i(

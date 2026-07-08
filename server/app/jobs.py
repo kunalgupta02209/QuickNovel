@@ -10,14 +10,16 @@ log = logging.getLogger("jobs")
 
 
 class Job:
-    def __init__(self, model: str, items: list[dict]):
+    def __init__(self, model: str | None, items: list[dict], script_type: str = "grammar"):
         self.id = uuid.uuid4().hex[:12]
-        self.model = model
+        self.model = model or "auto"  # "auto" -> fix_text routes via the script task
+        self.script_type = script_type  # grammar | performance
         self.items = items  # [{id, text}]
-        self.status = "queued"  # queued | running | done | cancelled | error
+        self.status = "queued"  # queued | running | paused | done | cancelled | error
         self.progress = 0
         self.total = len(items)
-        self.results: dict[str, str] = {}  # item id -> fixed text
+        self.results: dict[str, str] = {}       # item id -> fixed display text
+        self.paragraphs: dict[str, list] = {}   # item id -> span JSON (performance only)
         self.created = time.time()
         self.started: float | None = None
         self.finished: float | None = None
@@ -27,26 +29,37 @@ class Job:
         self.current_chunk = ""
         self._task: asyncio.Task | None = None
         self._cancel = False
+        self._pause = asyncio.Event()
+        self._pause.set()  # set = running
 
     async def run(self) -> None:
         self.status = "running"
         self.started = time.time()
-        log.info("job %s started: %d items, model=%s", self.id, self.total, self.model)
+        log.info("job %s started: %d items, model=%s script=%s", self.id, self.total, self.model, self.script_type)
         try:
             for it in self.items:
+                if not self._pause.is_set():
+                    self.status = "paused"
+                    await self._pause.wait()
+                    if not self._cancel:
+                        self.status = "running"
                 if self._cancel:
                     self.status = "cancelled"
                     log.info("job %s cancelled at %d/%d", self.id, self.progress, self.total)
                     return
-                fixed = await fix_text(
+                res = await fix_text(
                     it["text"],
-                    self.model,
+                    None if self.model == "auto" else self.model,
                     previous_chapters=it.get("previous_chapters") or "",
                     character_memory=it.get("character_memory") or "",
                     on_chunk=lambda i, n, out: setattr(self, "current_chunk", f"chunk {i + 1}/{n}"),
+                    script_type=self.script_type,
+                    pause_event=self._pause,
                 )
-                self.results[str(it["id"])] = fixed
-                self.chars_out += len(fixed)
+                self.results[str(it["id"])] = res["fixed"]
+                if res.get("paragraphs") is not None:
+                    self.paragraphs[str(it["id"])] = res["paragraphs"]
+                self.chars_out += len(res["fixed"])
                 self.progress += 1
             self.status = "done"
             log.info("job %s done", self.id)
@@ -62,7 +75,7 @@ class Job:
             self.current_chunk = ""
             history.append({
                 "kind": "llm", "id": self.id, "model": self.model, "status": self.status,
-                "items": self.total, "done": self.progress,
+                "script_type": self.script_type, "items": self.total, "done": self.progress,
                 "chars_in": self.chars_in, "chars_out": self.chars_out,
                 "duration_s": round(self.finished - (self.started or self.finished), 1),
                 "error": self.error,
@@ -70,13 +83,23 @@ class Job:
 
     def cancel(self) -> None:
         self._cancel = True
+        self._pause.set()  # wake a paused loop so it can exit
         if self._task and not self._task.done():
             self._task.cancel()
+
+    def pause(self) -> None:
+        self._pause.clear()
+
+    def resume(self) -> None:
+        self._pause.set()
+        if self.status == "paused":
+            self.status = "running"
 
     def summary(self) -> dict:
         return {
             "id": self.id,
             "model": self.model,
+            "script_type": self.script_type,
             "status": self.status,
             "progress": self.progress,
             "total": self.total,
@@ -89,7 +112,10 @@ class Job:
 
     def detail(self) -> dict:
         d = self.summary()
-        d["results"] = [{"id": k, "fixed": v} for k, v in self.results.items()]
+        d["results"] = [
+            {"id": k, "fixed": v, "paragraphs": self.paragraphs.get(k)}
+            for k, v in self.results.items()
+        ]
         return d
 
 
@@ -97,8 +123,8 @@ class JobManager:
     def __init__(self) -> None:
         self.jobs: dict[str, Job] = {}
 
-    def submit(self, model: str, items: list[dict]) -> Job:
-        job = Job(model, items)
+    def submit(self, model: str | None, items: list[dict], script_type: str = "grammar") -> Job:
+        job = Job(model, items, script_type)
         self.jobs[job.id] = job
         job._task = asyncio.create_task(job.run())
         return job
@@ -113,6 +139,18 @@ class JobManager:
         j = self.jobs.get(jid)
         if j:
             j.cancel()
+        return j
+
+    def pause(self, jid: str) -> Job | None:
+        j = self.jobs.get(jid)
+        if j:
+            j.pause()
+        return j
+
+    def resume(self, jid: str) -> Job | None:
+        j = self.jobs.get(jid)
+        if j:
+            j.resume()
         return j
 
 

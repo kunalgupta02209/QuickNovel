@@ -171,6 +171,10 @@ object LlmFixManager {
             RemoteFixClient.getJob(req.serverUrl, existing)?.status?.let { it == "running" || it == "queued" } == true
         val jobId = if (resume) existing else RemoteFixClient.submitBatch(req.serverUrl, req.serverModel, items)
         if (jobId.isNullOrBlank()) return DownloadState.IsFailed to alreadyFixed
+        if (!resume) {
+            // Intimate the user that work moved off-device and where to watch it.
+            com.lagradost.quicknovel.CommonActivity.showToast(com.lagradost.quicknovel.R.string.sent_fix_to_server)
+        }
         synchronized(lock) { serverJobIds[key] = jobId }
         emit(ctx, req, DownloadState.IsDownloading, alreadyFixed, total) // persists the job id
 

@@ -321,6 +321,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             if (serverUrl.isBlank()) {
                 showToast(R.string.server_update_no_url, Toast.LENGTH_LONG)
             } else {
+                showToast(R.string.server_update_downloading, Toast.LENGTH_LONG)
                 ioSafe {
                     if (true != activity?.let {
                             com.lagradost.quicknovel.util.InAppUpdater.Companion.run {

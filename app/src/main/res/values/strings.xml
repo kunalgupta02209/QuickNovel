@@ -273,6 +273,9 @@
     <string name="server_update_desc">Download and install the latest APK staged on your AI server (over Tailscale/LAN)</string>
     <string name="server_update_no_url">Set the AI server URL first (AI text-fixer server settings)</string>
     <string name="server_update_failed">Update download failed — is the server reachable?</string>
+    <string name="server_update_downloading">Downloading update — progress in the notification shade</string>
+    <string name="sent_tts_to_server">Chapters sent to server for audio generation — track it in the Cloud TTS notification or the web dashboard (/dashboard)</string>
+    <string name="sent_fix_to_server">Chapters sent to server for rewriting — track it in the fix notification or the web dashboard (/dashboard)</string>
     <string name="llm_server_connecting">Connecting…</string>
     <string name="llm_server_enter_url">Enter a server URL</string>
     <string name="llm_test_running">Running test rewrite…</string>

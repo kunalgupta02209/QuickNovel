@@ -27,6 +27,7 @@ app.include_router(telemetry.router)
 class SnippetReq(BaseModel):
     text: str
     model: str | None = None
+    script_type: str = "grammar"  # grammar | performance
     previous_chapters: str | None = ""
     character_memory: str | None = ""
 
@@ -40,6 +41,7 @@ class BatchItem(BaseModel):
 
 class BatchReq(BaseModel):
     model: str | None = None
+    script_type: str = "grammar"
     items: list[BatchItem]
 
 
@@ -84,8 +86,8 @@ def models():
 
 
 @app.get("/prompt")
-def get_prompt():
-    return {"prompt": prompts.system}
+def get_prompt(script_type: str = "grammar"):
+    return {"prompt": prompts.for_script(script_type), "script_type": script_type}
 
 
 @app.get("/config")
@@ -109,9 +111,12 @@ def set_store_samples(on: bool):
 # ---- fixing ----
 @app.post("/fix/snippet")
 async def fix_snippet(req: SnippetReq):
-    """Synchronous small-text fix (point 2)."""
-    out = await fix_text(req.text, req.model, req.previous_chapters or "", req.character_memory or "")
-    return {"fixed": out}
+    """Synchronous small-text fix; script_type=performance returns cue-annotated span JSON too."""
+    res = await fix_text(
+        req.text, req.model, req.previous_chapters or "", req.character_memory or "",
+        script_type=req.script_type,
+    )
+    return {"fixed": res["fixed"], "paragraphs": res.get("paragraphs"), "script_type": req.script_type}
 
 
 @app.post("/fix/batch")
@@ -119,7 +124,7 @@ async def fix_batch(req: BatchReq):
     """Kick off an async batch job over many chapters (point 2)."""
     if not req.items:
         raise HTTPException(400, "no items")
-    job = jobs.submit(req.model or config.default_model, [i.model_dump() for i in req.items])
+    job = jobs.submit(req.model, [i.model_dump() for i in req.items], req.script_type)
     return {"job_id": job.id}
 
 
@@ -140,6 +145,22 @@ def job_detail(jid: str):
 @app.post("/jobs/{jid}/cancel")
 def cancel_job(jid: str):
     j = jobs.cancel(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.summary()
+
+
+@app.post("/jobs/{jid}/pause")
+def pause_job(jid: str):
+    j = jobs.pause(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.summary()
+
+
+@app.post("/jobs/{jid}/resume")
+def resume_job(jid: str):
+    j = jobs.resume(jid)
     if not j:
         raise HTTPException(404, "job not found")
     return j.summary()
@@ -224,6 +245,22 @@ def tts_cancel_job(jid: str):
     return j.summary()
 
 
+@app.post("/tts/jobs/{jid}/pause")
+def tts_pause_job(jid: str):
+    j = tts_jobs.pause(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.summary()
+
+
+@app.post("/tts/jobs/{jid}/resume")
+def tts_resume_job(jid: str):
+    j = tts_jobs.resume(jid)
+    if not j:
+        raise HTTPException(404, "job not found")
+    return j.summary()
+
+
 @app.get("/tts/audio/{book_id}/{model_id}/{sid}/{index}/manifest")
 def tts_manifest(book_id: str, model_id: str, sid: int, index: int):
     return {"keys": tts_storage.chapter_keys(book_id, model_id, sid, index),
@@ -269,8 +306,8 @@ async def _watch():
                 if path.endswith(CONFIG_PATH.name):
                     config.reload()
                     log.info("config.yaml hot-reloaded")
-                elif path.endswith(PROMPT_PATH.name):
+                elif path.endswith(".md") and "prompts" in path:
                     prompts.reload()
-                    log.info("system prompt hot-reloaded")
+                    log.info("prompts hot-reloaded (%s)", path.rsplit("/", 1)[-1])
     except Exception:
         log.exception("file watcher stopped")

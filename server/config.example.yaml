@@ -37,7 +37,7 @@ opencode:
 # cloud is unreachable / key missing / budget cap hit. Explicit `model` in a request overrides.
 tasks:
   grammar_fix:        { model: "oc-glm-5.2",   fallback: "gemma2-2b" }
-  performance_script: { model: "oc-deepseek-v4-flash", fallback: "gemma2-2b" }
+  performance_script: { model: "oc-minimax-m2.7", fallback: "gemma2-2b" }
   character_summary:  { model: "oc-glm-5.2",        fallback: "oc-deepseek-v4-flash" }
 
 # Daily cloud spend guardrail (approximate: token counts x configured prices; models without prices

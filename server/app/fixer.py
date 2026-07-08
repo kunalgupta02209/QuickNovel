@@ -150,6 +150,67 @@ def _clean(out: str) -> str:
     return out.strip()
 
 
+# ---- QN-Cue v1 (performance scripts) --------------------------------------------------------
+# Closed vocabularies; anything outside them is stripped at parse time so jobs never fail on
+# model creativity. Stored form is span JSON (one span per paragraph in this P2 stub; P4 adds
+# real speaker spans from the character map).
+EVENT_TAGS = {"laugh", "chuckle", "sigh", "gasp", "breath", "groan", "yawn", "cough", "sniffle", "cry", "pant"}
+DELIVERY_TAGS = {"neutral", "soft", "whisper", "excited", "angry", "sad", "fearful", "tired", "shout"}
+_MARKER = re.compile(r"\[\[P(\d+)\]\]")
+_TAG = re.compile(r"<([a-z]+)>\s*")
+
+SCRIPT_TASKS = {"grammar": "grammar_fix", "performance": "performance_script"}
+
+
+def split_paragraphs(text: str) -> list[str]:
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+
+def _mark_paragraphs(paragraphs: list[str]) -> str:
+    return "\n\n".join(f"[[P{i}]]\n{p}" for i, p in enumerate(paragraphs))
+
+
+def _parse_performance(paragraphs: list[str], llm_out: str) -> list[dict]:
+    """Marker-anchored parse of cue-annotated LLM output -> span JSON. Any paragraph the model
+    mangled/dropped falls back to the raw original (src=raw) — alignment never fails a job."""
+    parts: dict[int, str] = {}
+    matches = list(_MARKER.finditer(llm_out))
+    for j, m in enumerate(matches):
+        end = matches[j + 1].start() if j + 1 < len(matches) else len(llm_out)
+        parts[int(m.group(1))] = llm_out[m.end():end].strip()
+
+    out = []
+    for i, src_text in enumerate(paragraphs):
+        t = parts.get(i, "")
+        if not t:
+            out.append({"i": i, "src": "raw", "spans": [
+                {"text": src_text, "speaker": "narrator", "delivery": "neutral", "events": []}]})
+            continue
+        delivery = "neutral"
+        events: list[dict] = []
+        # leading tags set paragraph delivery; all tags anywhere are captured (events) or stripped
+        lead = _TAG.match(t)
+        while lead:
+            tag = lead.group(1)
+            if tag in DELIVERY_TAGS:
+                delivery = tag
+            elif tag in EVENT_TAGS:
+                events.append({"tag": tag, "pos": "before"})
+            t = t[lead.end():]
+            lead = _TAG.match(t)
+
+        def _capture(mm: re.Match) -> str:
+            tag = mm.group(1)
+            if tag in EVENT_TAGS:
+                events.append({"tag": tag, "pos": "before"})
+            return ""
+
+        t = _TAG.sub(_capture, t).strip()
+        out.append({"i": i, "src": "llm", "spans": [
+            {"text": t or src_text, "speaker": "narrator", "delivery": delivery, "events": events}]})
+    return out
+
+
 def _call_params(model_id: str, task: str) -> dict:
     """Everything needed to call one model: litellm string, cloud/local kind, endpoint, sampling."""
     entry = config.model_entry(model_id) or {}
@@ -202,17 +263,26 @@ async def fix_text(
     character_memory: str = "",
     system_prompt: str | None = None,
     on_chunk=None,
-    task: str = "grammar_fix",
-) -> str:
-    """Rewrite a chapter: chunk -> LiteLLM per chunk -> stitch. Model comes from the explicit
-    model_id, else the task->model routing; cloud failures/quota/budget fall back per-chunk to the
-    task's local fallback so a job never dies on a cloud hiccup."""
+    task: str | None = None,
+    script_type: str = "grammar",
+    pause_event: asyncio.Event | None = None,
+) -> dict:
+    """Rewrite a chapter: chunk -> LiteLLM per chunk -> stitch. Returns {"fixed": str,
+    "paragraphs": list|None} (paragraphs only for script_type=performance). Model comes from the
+    explicit model_id, else the script_type-derived task routing; cloud failures/quota/budget fall
+    back per-chunk to the task's local fallback so a job never dies on a cloud hiccup. A cleared
+    pause_event suspends between chunks (job pause/resume)."""
     global _cloud_down_until
+    task = task or SCRIPT_TASKS.get(script_type, "grammar_fix")
     routing = config.task_model(task)
     primary_id = model_id or routing["model"] or config.default_model
     fallback_id = routing.get("fallback") if primary_id != routing.get("fallback") else None
 
-    system = system_prompt if system_prompt is not None else prompts.system
+    system = system_prompt if system_prompt is not None else prompts.for_script(script_type)
+    is_performance = script_type == "performance"
+    paragraphs_src = split_paragraphs(text) if is_performance else None
+    if is_performance and paragraphs_src:
+        text = _mark_paragraphs(paragraphs_src)  # [[P<n>]] markers survive chunking (paragraph-packed)
     active = _call_params(primary_id, task)
     if not _cloud_usable(active) and fallback_id:
         log.warning("cloud model %s unavailable (key/circuit/budget) -> starting on fallback %s",
@@ -228,10 +298,15 @@ async def fix_text(
     parts: list[str] = []
     fallbacks = 0
     for i, chunk in enumerate(chunks):
+        if pause_event is not None and not pause_event.is_set():
+            await pause_event.wait()  # job paused: suspend between chunks
         messages = _build_messages(system, chunk, prev if i == 0 else "", character_memory)
-        # A rewrite is ~the input length; hard-cap generation (tight floor) so short inputs don't
-        # over-generate a chat trailer and a looping model can't run away.
-        max_gen = min(1536, len(chunk) // 3 + 96)
+        # Local models get a tight cap (runaway/looping protection). Cloud models burn HIDDEN
+        # reasoning tokens inside max_tokens (measured: minimax/deepseek return EMPTY content with
+        # finish=length on tight caps), so they get a roomy budget — reasoning is fast and the
+        # visible output is still bounded by the prompt contract.
+        tight = min(2048, len(chunk) // 2 + 192) if is_performance else min(1536, len(chunk) // 3 + 96)
+        roomy = min(4096, len(chunk) + 1536)
         out = None
         for attempt_params in ([active] if not (active["is_cloud"] and fallback_id) else
                                [active, _call_params(fallback_id, task)]):
@@ -246,7 +321,7 @@ async def fix_text(
                         api_key=attempt_params["api_key"],
                         num_retries=2 if attempt_params["is_cloud"] else 1,
                         timeout=240,
-                        max_tokens=max_gen,
+                        max_tokens=roomy if attempt_params["is_cloud"] else tight,
                         **attempt_params["sampling"],
                     )
                 _usage = getattr(resp, "usage", None)
@@ -278,6 +353,13 @@ async def fix_text(
             if on_chunk:
                 on_chunk(i, len(chunks), out)
 
-    result = "\n\n".join(parts).strip()
+    raw_result = "\n\n".join(parts).strip()
+    paragraphs = None
+    if is_performance and paragraphs_src is not None:
+        paragraphs = _parse_performance(paragraphs_src, raw_result)
+        # display text = joined span texts (cues live ONLY in the structured spans, never in prose)
+        result = "\n\n".join(s["text"] for p in paragraphs for s in p["spans"]).strip()
+    else:
+        result = raw_result
     storage.store(primary_id, text, result, meta={"chunks": len(chunks), "task": task, "fallbacks": fallbacks})
-    return result
+    return {"fixed": result, "paragraphs": paragraphs}

@@ -27,6 +27,7 @@
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px;
           border:1px solid var(--line); color:var(--dim); }
   .pill.running { color:var(--acc); border-color:var(--acc); }
+  .pill.paused { color:var(--warn); border-color:var(--warn); }
   .pill.done { color:var(--ok); border-color:var(--ok); }
   .pill.error, .pill.cancelled { color:var(--err); border-color:var(--err); }
   .pill.online { color:var(--ok); border-color:var(--ok); }
@@ -73,8 +74,15 @@ function bar(done, total, status) {
   return `<div class="bar ${esc(status)}"><i style="width:${pct}%"></i></div>`;
 }
 function jobRow(j, kindPath) {
-  const cancel = j.status === 'running' || j.status === 'queued'
-    ? `<button onclick="cancelJob('${kindPath}','${esc(j.id)}')">stop</button>` : '';
+  let ctl = '';
+  if (j.status === 'running' || j.status === 'queued')
+    ctl = `<button onclick="jobAction('${kindPath}','${esc(j.id)}','pause')" style="border-color:var(--warn);color:var(--warn)">pause</button>
+           <button onclick="jobAction('${kindPath}','${esc(j.id)}','cancel')">stop</button>`;
+  else if (j.status === 'paused')
+    ctl = `<button onclick="jobAction('${kindPath}','${esc(j.id)}','resume')" style="border-color:var(--ok);color:var(--ok)">resume</button>
+           <button onclick="jobAction('${kindPath}','${esc(j.id)}','cancel')">stop</button>`;
+  const cancel = ctl;
+  const script = j.script_type && j.script_type !== 'grammar' ? ` · ${esc(j.script_type)}` : '';
   const rate = j.rate != null ? `${j.rate}/s` : '';
   const eta = j.eta_s != null ? ` · eta ${fmtDur(j.eta_s)}` : '';
   let extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
@@ -82,7 +90,7 @@ function jobRow(j, kindPath) {
   const dev = j.device_name ? ` · ${esc(j.device_name)}` : '';
   const label = j.book_id
     ? `${esc(j.book_name || j.book_id)} · ${esc(j.model_id)}/s${j.sid}${dev}`
-    : esc(j.model || '');
+    : esc(j.model || '') + script;
   let chips = '';
   if (j.chapters && j.chapters.length && j.status === 'running') {
     chips = '<div class="chips">' + j.chapters.map(c =>
@@ -98,8 +106,8 @@ function jobsTable(list, kindPath) {
   if (!list || !list.length) return '<div class="empty">no jobs</div>';
   return `<table><tr><th></th><th>job</th><th>progress</th><th></th></tr>${list.map(j => jobRow(j, kindPath)).join('')}</table>`;
 }
-async function cancelJob(kindPath, id) {
-  await fetch(`${kindPath}/${id}/cancel`, {method:'POST'}).catch(()=>{});
+async function jobAction(kindPath, id, action) {
+  await fetch(`${kindPath}/${id}/${action}`, {method:'POST'}).catch(()=>{});
   refresh();
 }
 function deviceCard(d) {

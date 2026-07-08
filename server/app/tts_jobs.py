@@ -71,6 +71,8 @@ class TtsJob:
         self.error: str | None = None
         self._task: asyncio.Task | None = None
         self._cancel = False
+        self._pause = asyncio.Event()
+        self._pause.set()  # set = running
 
     async def run(self) -> None:
         global _in_flight
@@ -86,6 +88,11 @@ class TtsJob:
                 index = int(it["index"])
                 self.current = {"index": index, "name": it.get("name") or ""}
                 for sent in (it.get("sentences") or []):
+                    if not self._pause.is_set():
+                        self.status = "paused"
+                        await self._pause.wait()
+                        if not self._cancel:
+                            self.status = "running"
                     if self._cancel:
                         self.status = "cancelled"
                         return
@@ -127,8 +134,17 @@ class TtsJob:
 
     def cancel(self) -> None:
         self._cancel = True
+        self._pause.set()  # wake a paused loop so it can exit
         if self._task and not self._task.done():
             self._task.cancel()
+
+    def pause(self) -> None:
+        self._pause.clear()
+
+    def resume(self) -> None:
+        self._pause.set()
+        if self.status == "paused":
+            self.status = "running"
 
     def summary(self) -> dict:
         return {
@@ -172,6 +188,18 @@ class TtsJobManager:
         j = self.jobs.get(jid)
         if j:
             j.cancel()
+        return j
+
+    def pause(self, jid: str) -> TtsJob | None:
+        j = self.jobs.get(jid)
+        if j:
+            j.pause()
+        return j
+
+    def resume(self, jid: str) -> TtsJob | None:
+        j = self.jobs.get(jid)
+        if j:
+            j.resume()
         return j
 
 
