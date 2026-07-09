@@ -40,6 +40,11 @@ tasks:
   performance_script: { model: "oc-minimax-m2.7", fallback: "gemma2-2b" }
   character_summary:  { model: "oc-glm-5.2",        fallback: "oc-deepseek-v4-flash" }
 
+# Reasoning-effort level sent on every CLOUD call (OpenAI-style: minimal|low|medium|high).
+# Lower = fewer hidden reasoning tokens = faster/cheaper. Override per task with a task-level
+# `reasoning_effort:` key. Comment out to use each provider's default.
+cloud_reasoning_effort: low
+
 # Daily cloud spend guardrail (approximate: token counts x configured prices; models without prices
 # count $0 and rely on the provider's own quota/429 -> fallback).
 cloud_budget:

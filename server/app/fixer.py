@@ -274,6 +274,7 @@ def _call_params(model_id: str, task: str) -> dict:
         "api_key": config.api_key_for(model_id) if is_cloud else None,
         "sampling": sampling,
         "task": task,
+        "effort": config.reasoning_effort(task) if is_cloud else None,  # OpenAI-style reasoning level
     }
 
 
@@ -361,6 +362,10 @@ async def fix_text(
                 async with sem:
                     _t0 = time.time()
                     extra = {"response_format": {"type": "json_object"}} if attempt_cloud_json else {}
+                    # reasoning_effort via extra_body so it survives litellm.drop_params for custom
+                    # cloud model names (OpenAI-compatible endpoints read it as a top-level body field).
+                    if attempt_params["is_cloud"] and attempt_params.get("effort"):
+                        extra["extra_body"] = {"reasoning_effort": attempt_params["effort"]}
                     resp = await litellm.acompletion(
                         model=attempt_params["litellm_model"],
                         messages=messages,

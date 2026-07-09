@@ -82,6 +82,9 @@ async def _llm_json(system: str, user: str, task: str = "character_summary") -> 
                 if not kwargs["api_key"]:
                     continue
                 kwargs["response_format"] = {"type": "json_object"}
+                effort = config.reasoning_effort(task)
+                if effort:
+                    kwargs["extra_body"] = {"reasoning_effort": effort}
             else:
                 kwargs["api_base"] = config.ollama_base_url
             t0 = time.time()

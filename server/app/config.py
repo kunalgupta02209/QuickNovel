@@ -127,6 +127,19 @@ class Config:
         t = (self.get("tasks", {}) or {}).get(task) or {}
         return {"model": t.get("model") or self.default_model, "fallback": t.get("fallback")}
 
+    _EFFORTS = ("minimal", "low", "medium", "high")
+
+    def reasoning_effort(self, task: str | None = None) -> str | None:
+        """Reasoning-effort level for CLOUD calls (OpenAI-style). Per-task `reasoning_effort` overrides
+        the global `cloud_reasoning_effort`; None/invalid = don't send the param (provider default)."""
+        if task:
+            t = (self.get("tasks", {}) or {}).get(task) or {}
+            if "reasoning_effort" in t:
+                v = t.get("reasoning_effort")
+                return v if v in self._EFFORTS else None
+        v = self.get("cloud_reasoning_effort")
+        return v if v in self._EFFORTS else None
+
     @property
     def cloud_budget(self) -> dict:
         b = self.get("cloud_budget", {}) or {}
