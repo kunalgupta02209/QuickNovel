@@ -401,10 +401,107 @@ def charmap_recast(book_id: str, cast_model: str = "kokoro"):
     return {"ok": True, "cast_version": m["casting_meta"]["cast_version"]}
 
 
+# ---- server-side generation from stored chapters (dashboard book management) ----
+class ScriptsGenReq(BaseModel):
+    book_id: str
+    start: int = 0
+    end: int = -1  # -1 = all stored chapters
+    model: str | None = None
+
+
+@app.post("/scripts/generate")
+async def scripts_generate(req: ScriptsGenReq):
+    """Generate the PERFORMANCE script for a book entirely server-side (from stored chapter texts).
+    Runs as a normal /fix job (script_type=performance) so pause/cancel/dashboard all apply; the
+    charmap CAST backfill drives the speakers; ScriptDocs persist under data/scripts/."""
+    idxs = chapter_texts.chapter_indices(req.book_id)
+    if not idxs:
+        raise HTTPException(404, "no stored chapters for this book")
+    end = req.end if req.end >= 0 else max(idxs)
+    have = {int(f.stem[1:]) for f in
+            (charmap.ROOT.parent / "scripts" / req.book_id / "performance").glob("c*.json")} \
+        if (charmap.ROOT.parent / "scripts" / req.book_id / "performance").is_dir() else set()
+    items = []
+    for i in idxs:
+        if req.start <= i <= end and i not in have:
+            text = chapter_texts.get_text(req.book_id, i)
+            if text:
+                items.append({"id": str(i), "text": text})
+    if not items:
+        return {"job_id": None, "skipped": "all requested chapters already have scripts"}
+    job = jobs.submit(req.model, items, "performance", req.book_id)
+    return {"job_id": job.id, "chapters": len(items)}
+
+
+@app.get("/scripts/{book_id}")
+def scripts_list(book_id: str):
+    d = charmap.ROOT.parent / "scripts" / book_id / "performance"
+    idxs = sorted(int(f.stem[1:]) for f in d.glob("c*.json")) if d.is_dir() else []
+    return {"book_id": book_id, "script_type": "performance", "chapters": idxs}
+
+
+@app.get("/scripts/{book_id}/performance/c{index}.json")
+def scripts_get(book_id: str, index: int):
+    f = charmap.ROOT.parent / "scripts" / book_id / "performance" / f"c{index}.json"
+    if not f.exists():
+        raise HTTPException(404, "no script for this chapter")
+    return Response(content=f.read_bytes(), media_type="application/json")
+
+
+class TtsGenReq(BaseModel):
+    book_id: str
+    model_id: str = "kitten"
+    sid: int = 0
+    start: int = 0
+    end: int = -1
+
+
+@app.post("/tts/generate")
+async def tts_generate(req: TtsGenReq):
+    """Server-side TTS generation from stored chapter texts — no device needed. Stored text is
+    line-per-sentence exactly as the app submitted it, so sha1(line) reproduces the app's cache
+    keys: devices later pull this audio as instant cache hits."""
+    import hashlib
+    idxs = chapter_texts.chapter_indices(req.book_id)
+    if not idxs:
+        raise HTTPException(404, "no stored chapters for this book")
+    end = req.end if req.end >= 0 else max(idxs)
+    meta = chapter_texts.meta(req.book_id)
+    items = []
+    for i in idxs:
+        if not (req.start <= i <= end):
+            continue
+        text = chapter_texts.get_text(req.book_id, i) or ""
+        sentences = [
+            {"key": hashlib.sha1(ln.encode("utf-8")).hexdigest()[:24], "text": ln}
+            for ln in text.splitlines() if ln.strip()
+        ]
+        if sentences:
+            items.append({"index": i, "name": (meta.get("chapters") or {}).get(str(i), ""),
+                          "sentences": sentences})
+    if not items:
+        raise HTTPException(400, "no synthesizable sentences in range")
+    job = tts_jobs.submit(
+        req.book_id, req.model_id, req.sid, 24000, items, config.tts_num_threads,
+        meta.get("book_name") or req.book_id, "dashboard", "web dashboard",
+    )
+    return {"job_id": job.id, "chapters": len(items)}
+
+
 # ---- book sync between devices (server-held chapter texts) ----
 @app.get("/books")
 def books_list():
-    return {"books": chapter_texts.list_books()}
+    books = chapter_texts.list_books()
+    # enrich with map/script/audio presence so the dashboard can render management state
+    for b in books:
+        bid = b["book_id"]
+        m = charmap.load_map(bid)
+        b["map_characters"] = len(m.get("characters") or []) if m else 0
+        b["map_through"] = m.get("through_chapter", -1) if m else -1
+        d = charmap.ROOT.parent / "scripts" / bid / "performance"
+        b["script_chapters"] = len(list(d.glob("c*.json"))) if d.is_dir() else 0
+        b["audio_voices"] = tts_storage.voices_for(bid)
+    return {"books": books}
 
 
 @app.get("/books/{book_id}/chapters.zip")

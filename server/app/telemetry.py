@@ -24,15 +24,24 @@ class TelemetryRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._latest: dict[str, dict] = {}  # device_id -> last snapshot (+received_at)
+        self._commands: dict[str, list[dict]] = {}  # device_id -> pending commands (piggyback channel)
 
-    def ingest(self, snapshot: dict) -> None:
+    def ingest(self, snapshot: dict) -> list[dict]:
+        """Store the snapshot; return (and clear) any pending commands for this device — the
+        telemetry POST response is the server->device command channel (no push needed)."""
         device_id = str(snapshot.get("device_id") or "").strip()
         if not device_id:
             raise ValueError("device_id required")
         snapshot = {**snapshot, "received_at": time.time()}
         with self._lock:
             self._latest[device_id] = snapshot
+            commands = self._commands.pop(device_id, [])
         self._persist(device_id, snapshot)
+        return commands
+
+    def queue_command(self, device_id: str, command: dict) -> None:
+        with self._lock:
+            self._commands.setdefault(device_id, []).append(command)
 
     def latest(self) -> list[dict]:
         now = time.time()
@@ -76,18 +85,32 @@ async def ingest_device(request: Request):
         snapshot = await request.json()
         if not isinstance(snapshot, dict):
             raise ValueError("object expected")
-        telemetry.ingest(snapshot)
+        commands = telemetry.ingest(snapshot)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception:  # noqa: BLE001
         log.exception("telemetry ingest failed")
         raise HTTPException(400, "bad snapshot")
-    return {"ok": True}
+    return {"ok": True, "commands": commands}
 
 
 @router.get("/telemetry/devices")
 def list_devices():
     return {"devices": telemetry.latest()}
+
+
+@router.post("/telemetry/devices/{device_id}/command")
+async def queue_device_command(device_id: str, request: Request):
+    """Queue a command for a device; delivered in its next telemetry POST response (<=60s away
+    while the app is open). e.g. {"type": "sync_books"} -> upload downloaded chapters for TTS."""
+    try:
+        cmd = await request.json()
+        if not isinstance(cmd, dict) or not cmd.get("type"):
+            raise ValueError("command object with type required")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    telemetry.queue_command(device_id, cmd)
+    return {"ok": True}
 
 
 @router.get("/telemetry/devices/{device_id}/history")

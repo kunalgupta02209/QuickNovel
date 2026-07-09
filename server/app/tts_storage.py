@@ -69,3 +69,22 @@ def zip_chapter(book_id: str, model_id: str, sid: int, index: int) -> bytes:
             for p in sorted(d.glob("*.wav")):
                 zf.write(p, arcname=p.name)  # entry name == "<key>.wav"
     return buf.getvalue()
+
+
+def voices_for(book_id: str) -> list[dict]:
+    """Voices with audio on the server for a book: [{model, sid, chapters}] (dashboard)."""
+    out = []
+    base = audio_dir() / _safe(book_id)
+    if base.is_dir():
+        for model in base.iterdir():
+            if not model.is_dir():
+                continue
+            for voice in model.glob("s*"):
+                try:
+                    sid = int(voice.name[1:])
+                except ValueError:
+                    continue
+                chapters = sum(1 for c in voice.glob("c*") if c.is_dir())
+                if chapters:
+                    out.append({"model": model.name, "sid": sid, "chapters": chapters})
+    return sorted(out, key=lambda v: -v["chapters"])

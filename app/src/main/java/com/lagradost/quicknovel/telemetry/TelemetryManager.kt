@@ -86,11 +86,12 @@ object TelemetryManager {
                     val eventDue = dirty.get() && now - lastSent >= maxOf(MIN_INTERVAL_MS, backoffMs)
                     if ((eventDue || heartbeatDue) && enabled()) {
                         dirty.set(false)
-                        val ok = runCatching {
+                        val body = runCatching {
                             TelemetryClient.postSnapshot(serverUrl(), buildSnapshotJson())
-                        }.getOrDefault(false)
+                        }.getOrNull()
                         lastSent = now
-                        backoffMs = if (ok) 0L else minOf(maxOf(backoffMs * 2, 10_000L), 300_000L)
+                        backoffMs = if (body != null) 0L else minOf(maxOf(backoffMs * 2, 10_000L), 300_000L)
+                        if (body != null) runCatching { handleCommands(body) }
                         idleSince = now
                     }
                     if (dirty.get() || foregroundCount.get() > 0) idleSince = now
@@ -104,6 +105,32 @@ object TelemetryManager {
 
     fun deviceIdentity(ctx: Context): Pair<String, String> =
         deviceId(ctx) to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+
+    /** Server->device commands piggybacked on the telemetry response (queued from the dashboard). */
+    private fun handleCommands(responseBody: String) {
+        val ctx = appContext ?: return
+        val commands = runCatching {
+            DataStore.mapper.readTree(responseBody).get("commands")
+        }.getOrNull() ?: return
+        for (cmd in commands) {
+            when (cmd.get("type")?.asText()) {
+                // "Sync chapters" button on the dashboard device card: upload every downloaded
+                // book's chapters + queue TTS via the standard download-complete trigger path.
+                "sync_books" -> runCatching {
+                    android.util.Log.i("Telemetry", "server command: sync_books")
+                    com.lagradost.quicknovel.BaseApplication.getKeys(com.lagradost.quicknovel.DOWNLOAD_FOLDER)
+                        ?.forEach { key ->
+                            val d = com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                                key, com.lagradost.quicknovel.ui.download.DownloadFragment.DownloadData::class.java
+                            ) ?: return@forEach
+                            com.lagradost.quicknovel.tts.RemoteTtsManager.maybeAutoQueueFromDownload(
+                                ctx, d.apiName, d.author, d.name, d.posterUrl,
+                            )
+                        }
+                }
+            }
+        }
+    }
 
     @SuppressLint("HardwareIds")
     private fun deviceId(ctx: Context): String =

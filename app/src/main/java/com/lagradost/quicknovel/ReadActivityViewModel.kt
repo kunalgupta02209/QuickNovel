@@ -2203,13 +2203,40 @@ class ReadActivityViewModel : ViewModel() {
         return com.lagradost.quicknovel.llm.FixedTextCache.isFixed(context, id, llmModel, llmPromptVersion, index)
     }
 
+    // one server fetch attempt per book|chapter per session (avoid hammering on missing scripts)
+    private val scriptFetchAttempted = HashSet<String>()
+
+    /** Server-generated performance scripts (dashboard "gen script") aren't on the device yet —
+     *  fetch + store on first use so reading/TTS work as if the app generated them. Blocking, but
+     *  only runs on the chapter-load coroutine and only once per chapter. */
+    private fun maybeFetchServerScript(ctx: Context, bookId: String, index: Int): String? {
+        if (llmServerUrl.isBlank()) return null
+        synchronized(scriptFetchAttempted) {
+            if (!scriptFetchAttempted.add("$bookId|$index")) return null
+        }
+        val raw = com.lagradost.quicknovel.llm.CharMapClient
+            .performanceScript(llmServerUrl, bookId, index) ?: return null
+        val paragraphs: List<com.lagradost.quicknovel.llm.FixedTextCache.Paragraph> = runCatching {
+            DataStore.mapper.readValue<List<com.lagradost.quicknovel.llm.FixedTextCache.Paragraph>>(raw)
+        }.getOrNull() ?: return null
+        val display = paragraphs.joinToString("\n\n") { p -> p.spans.joinToString(" ") { it.text } }
+            .trim().ifBlank { return null }
+        val script = com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
+        com.lagradost.quicknovel.llm.FixedTextCache.saveDoc(ctx, bookId, llmModel, llmPromptVersion, index, script, raw)
+        com.lagradost.quicknovel.llm.FixedTextCache.save(ctx, bookId, llmModel, llmPromptVersion, index, display, script)
+        return display
+    }
+
     /** Substitute the selected generated script (grammar or performance) for the raw chapter body. */
     private fun maybeFixedText(context: Context?, index: Int, raw: String): String {
         val script = com.lagradost.quicknovel.llm.ScriptType.fromReaderMode(llmScriptMode) ?: return raw
         if (context == null) return raw
         val id = llmBookId() ?: return raw
         val fixed = com.lagradost.quicknovel.llm.FixedTextCache
-            .load(context, id, llmModel, llmPromptVersion, index, script) ?: return raw
+            .load(context, id, llmModel, llmPromptVersion, index, script)
+            ?: (if (script == com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE)
+                maybeFetchServerScript(context, id, index) else null)
+            ?: return raw
         // The fixer emits plain text with blank-line paragraphs; wrap them as <p> so the reader's HTML
         // pipeline (preParseHtml -> markwon) keeps paragraph breaks like the original chapter.
         return fixed.split(Regex("\n{2,}")).filter { it.isNotBlank() }

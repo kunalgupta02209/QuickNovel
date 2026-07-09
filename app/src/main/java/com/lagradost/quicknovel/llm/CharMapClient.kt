@@ -39,4 +39,8 @@ object CharMapClient {
         val resp = get("${base(baseUrl)}/charmap/$bookId", 15000) ?: return null
         return runCatching { mapper.readTree(resp) }.getOrNull()
     }
+
+    /** A server-generated performance ScriptDoc (raw span JSON), or null when none exists. */
+    fun performanceScript(baseUrl: String, bookId: String, chapterIndex: Int): String? =
+        get("${base(baseUrl)}/scripts/$bookId/performance/c$chapterIndex.json", 10000)
 }

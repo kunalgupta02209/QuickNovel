@@ -9,7 +9,9 @@ import java.net.URL
  * and boolean results. Call only from a background thread.
  */
 object TelemetryClient {
-    fun postSnapshot(baseUrl: String, json: String): Boolean = try {
+    /** POST the snapshot; returns the response body on success (it carries queued server->device
+     *  commands, e.g. {"commands":[{"type":"sync_books"}]}), null on failure. */
+    fun postSnapshot(baseUrl: String, json: String): String? = try {
         val conn = URL("${baseUrl.trim().trimEnd('/')}/telemetry/device").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.connectTimeout = 4000
@@ -17,10 +19,11 @@ object TelemetryClient {
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-        val ok = conn.responseCode in 200..299
+        val body = if (conn.responseCode in 200..299)
+            conn.inputStream.bufferedReader().readText() else null
         conn.disconnect()
-        ok
+        body
     } catch (t: Throwable) {
-        false // silent by design
+        null // silent by design
     }
 }
