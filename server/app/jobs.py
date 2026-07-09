@@ -33,20 +33,37 @@ class Job:
         self._pause = asyncio.Event()
         self._pause.set()  # set = running
 
+    def _parallel_items(self) -> int:
+        """Concurrent ITEMS (chapters) for this job. Cloud models are network-bound -> several
+        chapters at once (still bounded by fixer's cloud semaphore); local Ollama stays serial."""
+        from .config import config
+        from .fixer import SCRIPT_TASKS
+
+        model_id = None if self.model == "auto" else self.model
+        if model_id is None:
+            model_id = config.task_model(SCRIPT_TASKS.get(self.script_type, "grammar_fix"))["model"]
+        if config.is_cloud(model_id):
+            return max(1, int(config.get("fix_parallel_items", 4)))
+        return 1
+
     async def run(self) -> None:
         self.status = "running"
         self.started = time.time()
-        log.info("job %s started: %d items, model=%s script=%s", self.id, self.total, self.model, self.script_type)
-        try:
-            for it in self.items:
+        parallel = self._parallel_items()
+        log.info("job %s started: %d items, model=%s script=%s parallel=%d",
+                 self.id, self.total, self.model, self.script_type, parallel)
+        item_sem = asyncio.Semaphore(parallel)
+
+        async def do_item(it: dict) -> None:
+            async with item_sem:
+                if self._cancel:
+                    return
                 if not self._pause.is_set():
                     self.status = "paused"
                     await self._pause.wait()
                     if not self._cancel:
                         self.status = "running"
                 if self._cancel:
-                    self.status = "cancelled"
-                    log.info("job %s cancelled at %d/%d", self.id, self.progress, self.total)
                     return
                 # Backfill character memory from the server-side map when the app sent none —
                 # this alone resurrects the character-consistency feature with zero app change.
@@ -54,7 +71,10 @@ class Job:
                 if not memory and self.book_id:
                     try:
                         from . import charmap
-                        memory = charmap.prompt_block(self.book_id, int(it.get("id", -1)) if str(it.get("id", "")).lstrip("-").isdigit() else None)
+                        memory = charmap.prompt_block(
+                            self.book_id,
+                            int(it.get("id", -1)) if str(it.get("id", "")).lstrip("-").isdigit() else None,
+                        )
                     except Exception:  # noqa: BLE001
                         memory = ""
                 res = await fix_text(
@@ -62,7 +82,7 @@ class Job:
                     None if self.model == "auto" else self.model,
                     previous_chapters=it.get("previous_chapters") or "",
                     character_memory=memory,
-                    on_chunk=lambda i, n, out: setattr(self, "current_chunk", f"chunk {i + 1}/{n}"),
+                    on_chunk=lambda i, n, out: setattr(self, "current_chunk", f"ch {it['id']} chunk {i + 1}/{n}"),
                     script_type=self.script_type,
                     pause_event=self._pause,
                 )
@@ -82,6 +102,14 @@ class Job:
                             pass
                 self.chars_out += len(res["fixed"])
                 self.progress += 1
+
+        try:
+            # Chapters run through a bounded gather; results are keyed by id so order is irrelevant.
+            await asyncio.gather(*(do_item(it) for it in self.items))
+            if self._cancel:
+                self.status = "cancelled"
+                log.info("job %s cancelled at %d/%d", self.id, self.progress, self.total)
+                return
             self.status = "done"
             log.info("job %s done", self.id)
         except asyncio.CancelledError:

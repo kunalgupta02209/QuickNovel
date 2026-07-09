@@ -45,6 +45,10 @@ tasks:
 # `reasoning_effort:` key. Comment out to use each provider's default.
 cloud_reasoning_effort: low
 
+# Concurrent CHAPTERS per cloud fix/script job (network-bound; still capped by the internal
+# 4-slot cloud semaphore). Local Ollama jobs always run 1-wide (VRAM).
+fix_parallel_items: 4
+
 # Daily cloud spend guardrail (approximate: token counts x configured prices; models without prices
 # count $0 and rely on the provider's own quota/429 -> fallback).
 cloud_budget:

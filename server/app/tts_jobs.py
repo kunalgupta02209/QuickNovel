@@ -87,14 +87,20 @@ class TtsJob:
                     return
                 index = int(it["index"])
                 self.current = {"index": index, "name": it.get("name") or ""}
-                for sent in (it.get("sentences") or []):
+
+                async def synth_one(sent: dict) -> None:
+                    """One sentence; the shared semaphore bounds true concurrency. Sentences of a
+                    chapter run CONCURRENTLY (a single job now saturates the whole pool instead of
+                    one stream); the per-chapter gather keeps chapter-done ordering intact."""
+                    global _in_flight
+                    if self._cancel:
+                        return
                     if not self._pause.is_set():
                         self.status = "paused"
                         await self._pause.wait()
                         if not self._cancel:
                             self.status = "running"
                     if self._cancel:
-                        self.status = "cancelled"
                         return
                     key = sent["key"]
                     # P5 casting: a sentence may carry its own voice/pace; storage stays under the
@@ -103,6 +109,8 @@ class TtsJob:
                     s_speed = float(sent.get("speed") or 1.0)
                     if not tts_storage.exists(self.book_id, self.model_id, self.sid, index, key):
                         async with _semaphore():
+                            if self._cancel:
+                                return
                             _in_flight += 1
                             try:
                                 _t0 = time.time()
@@ -116,6 +124,11 @@ class TtsJob:
                         self.synthesized += 1
                     self.progress += 1
                     self.chapters[index]["done"] += 1
+
+                await asyncio.gather(*(synth_one(s) for s in (it.get("sentences") or [])))
+                if self._cancel:
+                    self.status = "cancelled"
+                    return
             self.status = "done"
             self.current = None
             log.info("tts job %s done", self.id)
