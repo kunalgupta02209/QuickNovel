@@ -440,4 +440,7 @@
     <string name="tts_stop">Stop</string>
     <string name="audio_sync_manager_desc">View, control and delete generated read-aloud audio across all books</string>
     <string name="tts_perf_log">Log CPU usage during playback (PerfMon)</string>
+    <string name="on_device_gen_title">Allow on-device generation</string>
+    <string name="on_device_gen_desc">Off = play only cached/synced audio and use only the server for rewrites. Prevents battery drain and heating from on-device synthesis.</string>
+    <string name="on_device_gen_disabled">On-device generation is disabled (Settings) — using cached/server results only</string>
 </resources>

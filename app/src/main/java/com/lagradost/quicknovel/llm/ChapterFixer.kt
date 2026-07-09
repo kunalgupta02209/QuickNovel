@@ -90,6 +90,12 @@ object ChapterFixer {
             android.util.Log.w("LlmFixFlow", "remote fix failed; falling back to on-device")
             onStatus?.invoke("⚠ Server error — rewriting on device (slower)")
         }
+        // Global on-device generation kill-switch (battery/heat guard): server-only fixes.
+        if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(context)) {
+            android.util.Log.i("LlmFixFlow", "on-device fix skipped: generation disabled")
+            onStatus?.invoke(context.getString(com.lagradost.quicknovel.R.string.on_device_gen_disabled))
+            return null
+        }
         lastFixViaServer = false
         val e = ensureEngine(context, cfg.modelId) ?: return null
         return try {

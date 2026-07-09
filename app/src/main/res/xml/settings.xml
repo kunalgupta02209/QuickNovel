@@ -118,6 +118,12 @@
                 android:title="@string/check_for_update"
                 app:key="@string/manual_check_update_key"
                 app:icon="@drawable/ic_baseline_system_update_24" />
+        <SwitchPreference
+                android:defaultValue="true"
+                android:title="@string/on_device_gen_title"
+                android:summary="@string/on_device_gen_desc"
+                app:key="on_device_generation"
+                app:icon="@drawable/ic_baseline_volume_up_24" />
         <Preference
                 android:title="@string/audio_sync_manager"
                 android:summary="@string/audio_sync_manager_desc"

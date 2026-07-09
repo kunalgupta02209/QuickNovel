@@ -27,6 +27,7 @@ object TtsPrefetchManager {
         sid: Int,
         batches: List<List<TTSHelper.TTSLine>>,
     ) {
+        if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(ctx)) return
         if (batches.isEmpty()) return
         val myGen = synchronized(this) { ++generation }
         Thread({

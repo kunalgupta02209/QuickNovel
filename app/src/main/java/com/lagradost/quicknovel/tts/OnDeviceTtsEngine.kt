@@ -396,6 +396,15 @@ class OnDeviceTtsEngine(
             }
         }
 
+        // Global on-device generation kill-switch: cached playback only — skip uncached lines
+        // instead of synthesizing (battery/heat guard).
+        if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(appContext)) {
+            Log.i(TAG, "render SKIP (on-device generation disabled) '${item.line.speakOutMsg.take(40)}'")
+            item.failed = true
+            synchronized(lock) { lock.notifyAll() }
+            return
+        }
+
         val chunks = ArrayList<FloatArray>()
         var total = 0
         val sink: (FloatArray) -> Int = cb@{ samples ->

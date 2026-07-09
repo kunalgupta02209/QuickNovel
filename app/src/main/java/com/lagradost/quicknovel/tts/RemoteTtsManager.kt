@@ -173,7 +173,11 @@ object RemoteTtsManager {
                 TAG,
                 "onBookReady -> on-device fallback key=$key (serverUrl=${req.serverUrl.ifBlank { "unset" }}, reachable=false)"
             )
-            // On-device fallback (same key space -> shared dedupe).
+            // On-device fallback (same key space -> shared dedupe) — unless globally disabled.
+            if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(ctx)) {
+                android.util.Log.i(TAG, "on-device fallback skipped: generation disabled (key=$key)")
+                return
+            }
             TtsPregenManager.ensureAutoPregen(
                 ctx,
                 TtsPregenManager.PregenRequest(

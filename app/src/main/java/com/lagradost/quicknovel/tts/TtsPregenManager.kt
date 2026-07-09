@@ -100,6 +100,10 @@ object TtsPregenManager {
 
     /** Seed a pending record + row and hand the request to the serial WorkManager chain. */
     fun enqueue(context: Context, req: PregenRequest) {
+        if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(context)) {
+            com.lagradost.quicknovel.CommonActivity.showToast(com.lagradost.quicknovel.R.string.on_device_gen_disabled)
+            return
+        }
         val total = req.rangeEnd - req.rangeStart + 1
         emit(context.applicationContext, req, DownloadState.IsPending, 0, total)
         TtsPregenWorkManager.enqueue(context, req)
@@ -190,6 +194,10 @@ object TtsPregenManager {
      * whole range is already cached. Enqueues the same serial WorkManager chain as manual pre-gen.
      */
     fun ensureAutoPregen(context: Context, req: PregenRequest) {
+        if (!com.lagradost.quicknovel.util.DeviceGenGate.allowed(context)) {
+            android.util.Log.i("TtsPregen", "autopregen skipped: on-device generation disabled")
+            return
+        }
         if (isRunning(req.key)) return
         val ctx = context.applicationContext
         val total = req.rangeEnd - req.rangeStart + 1
