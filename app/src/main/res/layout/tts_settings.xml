@@ -225,6 +225,15 @@
                 android:text="@string/tts_cached_chapters"
                 app:icon="@drawable/ic_baseline_volume_up_24"
                 app:iconGravity="textStart" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/tts_sync_manager_button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/audio_sync_manager"
+                app:icon="@drawable/ic_baseline_cloud_24"
+                app:iconGravity="textStart" />
         </LinearLayout>
 
         <com.google.android.material.button.MaterialButton

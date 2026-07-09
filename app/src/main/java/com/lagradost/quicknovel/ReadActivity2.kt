@@ -597,6 +597,10 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
             com.lagradost.quicknovel.ui.tts.TtsGenerateDialog.show(this@ReadActivity2)
         }
 
+        b.ttsSyncManagerButton.setOnClickListener {
+            com.lagradost.quicknovel.ui.tts.AudioSyncManagerDialog.show(this@ReadActivity2)
+        }
+
         b.ttsSettingsDone.setOnClickListener { dialog.dismiss() }
         refreshEngine()
         dialog.show()

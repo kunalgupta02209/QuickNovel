@@ -313,6 +313,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return@setOnPreferenceClickListener true
         }
 
+        // Manage generated read-aloud audio (storage + active syncs) across all books.
+        findPreference<Preference>("tts_sync_manager")?.setOnPreferenceClickListener {
+            activity?.let { com.lagradost.quicknovel.ui.tts.AudioSyncManagerDialog.show(it) }
+            return@setOnPreferenceClickListener true
+        }
+
         // Pull a book another device uploaded (server-held chapter texts -> local download layout).
         findPreference<Preference>("server_book_sync")?.setOnPreferenceClickListener {
             val serverUrl = com.lagradost.quicknovel.BaseApplication.getKey<String>(

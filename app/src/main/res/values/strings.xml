@@ -427,4 +427,16 @@
     <string name="server_book_sync_done">Book synced — check your Library</string>
     <string name="server_book_sync_failed">Book sync failed</string>
     <string name="tts_casting">Character voices (performance script casting)</string>
+    <string name="audio_sync_manager">Audio sync &amp; storage</string>
+    <string name="sort_close">Close</string>
+    <string name="audio_sync_total">%1$s of audio &#183; %2$d chapters &#183; %3$d voices</string>
+    <string name="audio_sync_active">Active syncs</string>
+    <string name="audio_sync_stored">Stored audio</string>
+    <string name="audio_sync_empty">No generated audio yet</string>
+    <string name="audio_sync_delete_book">Delete all</string>
+    <string name="audio_sync_delete_book_confirm">Delete ALL generated audio for “%1$s”?</string>
+    <string name="tts_resume">Resume</string>
+    <string name="tts_pause">Pause</string>
+    <string name="tts_stop">Stop</string>
+    <string name="audio_sync_manager_desc">View, control and delete generated read-aloud audio across all books</string>
 </resources>
