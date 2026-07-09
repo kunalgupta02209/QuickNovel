@@ -537,6 +537,11 @@ def book_chapters_zip(book_id: str):
 @app.on_event("startup")
 async def _startup():
     history.on_server_start()
+    try:
+        from . import job_store
+        job_store.resume_all()
+    except Exception:  # noqa: BLE001
+        log.exception("job resume failed")
     asyncio.create_task(_watch())
     # Size the TTS synthesis semaphore + optionally pre-provision models (download only, no engine).
     from .tts_jobs import configure as _tts_configure

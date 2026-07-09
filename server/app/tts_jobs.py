@@ -43,8 +43,9 @@ def sem_stats() -> dict:
 
 class TtsJob:
     def __init__(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
-                 num_threads: int, book_name: str = "", device_id: str = "", device_name: str = ""):
-        self.id = uuid.uuid4().hex[:12]
+                 num_threads: int, book_name: str = "", device_id: str = "", device_name: str = "",
+                 jid: str | None = None):
+        self.id = jid or uuid.uuid4().hex[:12]
         self.book_id = book_id
         self.book_name = book_name  # human-readable (dashboard); book_id stays the storage key
         self.device_id = device_id  # submitting device (attribution — devices share the audio cache
@@ -147,6 +148,8 @@ class TtsJob:
             self.error = str(e)
         finally:
             self.finished = time.time()
+            from . import job_store
+            job_store.remove("tts", self.id)
             history.append({
                 "kind": "tts", "id": self.id, "book_id": self.book_id, "model": self.model_id,
                 "sid": self.sid, "status": self.status, "sentences": self.total,
@@ -195,9 +198,17 @@ class TtsJobManager:
         self.jobs: dict[str, TtsJob] = {}
 
     def submit(self, book_id: str, model_id: str, sid: int, sample_rate: int, items: list[dict],
-               num_threads: int, book_name: str = "", device_id: str = "", device_name: str = "") -> TtsJob:
-        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads, book_name, device_id, device_name)
+               num_threads: int, book_name: str = "", device_id: str = "", device_name: str = "",
+               jid: str | None = None) -> TtsJob:
+        job = TtsJob(book_id, model_id, sid, sample_rate, items, num_threads, book_name,
+                     device_id, device_name, jid=jid)
         self.jobs[job.id] = job
+        from . import job_store
+        job_store.save("tts", job.id, {
+            "book_id": book_id, "model_id": model_id, "sid": sid, "sample_rate": sample_rate,
+            "items": items, "num_threads": num_threads, "book_name": book_name,
+            "device_id": device_id, "device_name": device_name,
+        })
         job._task = asyncio.create_task(job.run())
         return job
 

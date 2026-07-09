@@ -8,3 +8,4 @@ venv/
 static/quicknovel.apk
 data/
 .env
+data/jobs/

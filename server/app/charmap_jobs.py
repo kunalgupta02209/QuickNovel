@@ -14,8 +14,9 @@ log = logging.getLogger("charmap_jobs")
 
 
 class CharmapJob:
-    def __init__(self, book_id: str, start: int, end: int, cast_model: str = "kokoro"):
-        self.id = uuid.uuid4().hex[:12]
+    def __init__(self, book_id: str, start: int, end: int, cast_model: str = "kokoro",
+                 jid: str | None = None):
+        self.id = jid or uuid.uuid4().hex[:12]
         self.book_id = book_id
         self.start = start
         self.end = end
@@ -71,6 +72,8 @@ class CharmapJob:
             self.error = str(e)
         finally:
             self.finished = time.time()
+            from . import job_store
+            job_store.remove("charmap", self.id)
             history.append({
                 "kind": "llm", "task": "character_summary", "id": self.id, "model": "charmap",
                 "status": self.status, "items": self.total, "done": self.progress,
@@ -104,9 +107,13 @@ class CharmapJobManager:
     def __init__(self) -> None:
         self.jobs: dict[str, CharmapJob] = {}
 
-    def submit(self, book_id: str, start: int, end: int, cast_model: str = "kokoro") -> CharmapJob:
-        job = CharmapJob(book_id, start, end, cast_model)
+    def submit(self, book_id: str, start: int, end: int, cast_model: str = "kokoro",
+               jid: str | None = None) -> CharmapJob:
+        job = CharmapJob(book_id, start, end, cast_model, jid=jid)
         self.jobs[job.id] = job
+        from . import job_store
+        job_store.save("charmap", job.id, {"book_id": book_id, "start": start, "end": end,
+                                           "cast_model": cast_model})
         job._task = asyncio.create_task(job.run())
         return job
 

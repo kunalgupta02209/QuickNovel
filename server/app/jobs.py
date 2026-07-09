@@ -10,8 +10,9 @@ log = logging.getLogger("jobs")
 
 
 class Job:
-    def __init__(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = ""):
-        self.id = uuid.uuid4().hex[:12]
+    def __init__(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = "",
+                 jid: str | None = None):
+        self.id = jid or uuid.uuid4().hex[:12]
         self.model = model or "auto"  # "auto" -> fix_text routes via the script task
         self.script_type = script_type  # grammar | performance
         self.book_id = book_id  # enables charmap memory backfill
@@ -137,6 +138,8 @@ class Job:
         finally:
             self.finished = time.time()
             self.current_chunk = ""
+            from . import job_store
+            job_store.remove("fix", self.id)
             history.append({
                 "kind": "llm", "id": self.id, "model": self.model, "status": self.status,
                 "script_type": self.script_type, "items": self.total, "done": self.progress,
@@ -196,9 +199,13 @@ class JobManager:
     def __init__(self) -> None:
         self.jobs: dict[str, Job] = {}
 
-    def submit(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = "") -> Job:
-        job = Job(model, items, script_type, book_id)
+    def submit(self, model: str | None, items: list[dict], script_type: str = "grammar", book_id: str = "",
+               jid: str | None = None) -> Job:
+        job = Job(model, items, script_type, book_id, jid=jid)
         self.jobs[job.id] = job
+        from . import job_store
+        job_store.save("fix", job.id, {"model": model, "items": items,
+                                       "script_type": script_type, "book_id": book_id})
         job._task = asyncio.create_task(job.run())
         return job
 
