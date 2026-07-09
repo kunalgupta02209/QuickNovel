@@ -405,6 +405,7 @@ class OnDeviceTtsEngine(
             1
         }
         val t0 = System.currentTimeMillis()
+        activeRenderCount.incrementAndGet() // PerfMonitor: synthesis in flight (CPU-heavy vs cache hit)
         try {
             val gen = TtsModels.resolveGenerationConfig(appContext, def, useSid, useSpeed)
             if (gen != null) engine.generateWithConfigAndCallback(text = useText, config = gen, callback = sink)
@@ -413,6 +414,8 @@ class OnDeviceTtsEngine(
             logError(t); item.failed = true
             synchronized(lock) { lock.notifyAll() }
             return
+        } finally {
+            activeRenderCount.decrementAndGet()
         }
         if (item.cancelled) return
         val raw = FloatArray(total)
@@ -499,6 +502,11 @@ class OnDeviceTtsEngine(
     }
 
     companion object {
+        /** Live TTS synthesis calls in flight across all engines — read by PerfMonitor to tell
+         *  CPU-heavy synthesis apart from cheap cache-hit playback. */
+        private val activeRenderCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val activeRenders: Int get() = activeRenderCount.get()
+
         private const val TAG = "OnDeviceTts"
         private const val PCM_BEHIND = 3   // played sentences whose PCM is kept for instant back-skip
         private const val MAX_LOOKAHEAD = 6

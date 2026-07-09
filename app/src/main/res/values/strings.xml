@@ -439,4 +439,5 @@
     <string name="tts_pause">Pause</string>
     <string name="tts_stop">Stop</string>
     <string name="audio_sync_manager_desc">View, control and delete generated read-aloud audio across all books</string>
+    <string name="tts_perf_log">Log CPU usage during playback (PerfMon)</string>
 </resources>

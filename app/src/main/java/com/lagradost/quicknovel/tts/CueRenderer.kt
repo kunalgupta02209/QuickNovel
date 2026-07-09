@@ -16,6 +16,18 @@ import java.io.File
  */
 object CueRenderer {
 
+    // Voice tables mirror the server's casting.py (sid, is-male), ordered by assignment preference.
+    private data class Voice(val sid: Int, val male: Boolean)
+    private val KOKORO = listOf(
+        Voice(5, true), Voice(6, true), Voice(9, true), Voice(10, true),
+        Voice(1, false), Voice(2, false), Voice(3, false), Voice(7, false),
+        Voice(8, false), Voice(4, false), Voice(0, false),
+    )
+    private val KITTEN = listOf(
+        Voice(0, true), Voice(2, true), Voice(4, true), Voice(6, true),
+        Voice(1, false), Voice(3, false), Voice(5, false), Voice(7, false),
+    )
+
     /** Everything the synthesizer needs to render one line in character. */
     data class CueDirective(
         val sid: Int? = null,          // per-line voice (casting); null = the user's chosen voice
@@ -77,16 +89,38 @@ object CueRenderer {
         var narratorCast: Pair<Int?, Float> = null to 1.0f
         if (castingEnabled) {
             val m = loadMap(ctx, bookId)
-            m?.get("characters")?.forEach { c ->
-                val id = c.get("id")?.asText() ?: return@forEach
-                val cast = c.get("casting") ?: return@forEach
-                val sid = cast.get("sid")?.asInt()?.takeIf { cast.get("model")?.asText() == modelId }
-                castBySpeaker["char:$id"] = sid to (cast.get("speed")?.floatValue() ?: 1.0f)
+            // Re-cast to the ACTIVE playback model. The server map may be cast for a different model
+            // (maps default to kokoro; many users play kitten) — honor its sid only when the models
+            // match, else derive a gender-matched voice from the active model's table so casting
+            // works regardless of which model built the map.
+            val table = if (modelId == "kokoro") KOKORO else KITTEN
+            val used = HashMap<Int, Int>()
+            fun nextByGender(gender: String?): Int {
+                val pool = when (gender) {
+                    "male" -> table.filter { it.male }
+                    "female" -> table.filter { !it.male }
+                    else -> table
+                }.ifEmpty { table }
+                val best = pool.minByOrNull { used[it.sid] ?: 0 } ?: table.first()
+                used[best.sid] = (used[best.sid] ?: 0) + 1
+                return best.sid
+            }
+            // Most-prominent characters first, so voice assignment is stable across chapters.
+            val chars = m?.get("characters")?.toList()
+                ?.sortedByDescending { it.get("prominence")?.asInt() ?: 0 } ?: emptyList()
+            for (c in chars) {
+                val id = c.get("id")?.asText() ?: continue
+                val cast = c.get("casting")
+                val speed = cast?.get("speed")?.floatValue() ?: 1.0f
+                val sid = if (cast?.get("model")?.asText() == modelId) cast.get("sid")?.asInt()
+                else nextByGender(c.get("gender")?.asText())
+                castBySpeaker["char:$id"] = sid to speed
             }
             m?.get("narration")?.get("casting")?.let { cast ->
-                narratorCast = cast.get("sid")?.asInt()
-                    ?.takeIf { cast.get("model")?.asText() == modelId } to
-                        (cast.get("speed")?.floatValue() ?: 1.0f)
+                // Narrator keeps its cast voice on a model match; otherwise the user's chosen voice
+                // (null) carries the narration and characters get the distinct gender-matched voices.
+                val sid = if (cast.get("model")?.asText() == modelId) cast.get("sid")?.asInt() else null
+                narratorCast = sid to (cast.get("speed")?.floatValue() ?: 1.0f)
             }
         }
 
