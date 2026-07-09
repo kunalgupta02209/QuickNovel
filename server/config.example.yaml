@@ -38,7 +38,7 @@ opencode:
 tasks:
   grammar_fix:        { model: "oc-glm-5.2",   fallback: "gemma2-2b" }
   performance_script: { model: "oc-minimax-m2.7", fallback: "gemma2-2b" }
-  character_summary:  { model: "oc-glm-5.2",        fallback: "oc-deepseek-v4-flash" }
+  character_summary:  { model: "oc-glm-5.2",        fallback: "oc-glm-5.1" }
 
 # Reasoning-effort level sent on every CLOUD call (OpenAI-style: minimal|low|medium|high).
 # Lower = fewer hidden reasoning tokens = faster/cheaper. Override per task with a task-level
@@ -62,6 +62,10 @@ models:
   - id: "oc-glm-5.2"
     name: "GLM 5.2 (OpenCode · cloud)"
     litellm: "openai/glm-5.2"
+    kind: "cloud"
+  - id: "oc-glm-5.1"
+    name: "GLM 5.1 (OpenCode · cloud)"
+    litellm: "openai/glm-5.1"
     kind: "cloud"
   - id: "oc-deepseek-v4-flash"
     name: "DeepSeek V4 Flash (OpenCode · cloud)"
