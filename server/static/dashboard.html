@@ -151,7 +151,8 @@ async function refresh() {
   $('serverline').textContent =
     `up ${fmtDur(o.server.uptime_s)} · default model ${o.server.default_model}` +
     (o.server.gpu_busy ? ' · LLM generating' : '');
-  kv($('llmkv'), [['tok/s', o.llm.rates.tok_per_s], ['chunks/min', o.llm.rates.chunks_per_min],
+  kv($('llmkv'), [['parallel', `${(o.cloud||{}).in_flight ?? 0}/${(o.cloud||{}).slots ?? 4}`],
+                  ['tok/s', o.llm.rates.tok_per_s], ['chunks/min', o.llm.rates.chunks_per_min],
                   ['avg chunk', o.llm.rates.avg_chunk_s != null ? o.llm.rates.avg_chunk_s + 's' : 'n/a']]);
   $('llmjobs').innerHTML = jobsTable(o.llm.jobs, '/jobs');
   kv($('ttskv'), [['sentences/min', o.tts.rates.sentences_per_min],

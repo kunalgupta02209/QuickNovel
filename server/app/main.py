@@ -420,13 +420,22 @@ async def scripts_generate(req: ScriptsGenReq):
     """Generate the PERFORMANCE script for a book entirely server-side (from stored chapter texts).
     Runs as a normal /fix job (script_type=performance) so pause/cancel/dashboard all apply; the
     charmap CAST backfill drives the speakers; ScriptDocs persist under data/scripts/."""
+    if req.script_type not in ("performance", "grammar"):
+        raise HTTPException(400, "script_type must be performance or grammar")
+    # dedupe: a running job for the same book+script (double-clicked dashboard button, or a
+    # persisted-job resume racing a manual submit) must not double-burn cloud quota
+    dup = next((j for j in jobs.jobs.values()
+                if j.book_id == req.book_id and j.script_type == req.script_type
+                and j.status in ("queued", "running", "paused")), None)
+    if dup:
+        return {"job_id": dup.id, "chapters": dup.total, "deduped": True}
     idxs = chapter_texts.chapter_indices(req.book_id)
     if not idxs:
         raise HTTPException(404, "no stored chapters for this book")
     end = req.end if req.end >= 0 else max(idxs)
-    have = {int(f.stem[1:]) for f in
-            (charmap.ROOT.parent / "scripts" / req.book_id / "performance").glob("c*.json")} \
-        if (charmap.ROOT.parent / "scripts" / req.book_id / "performance").is_dir() else set()
+    ext = "json" if req.script_type == "performance" else "txt"
+    sdir = charmap.ROOT.parent / "scripts" / req.book_id / req.script_type
+    have = {int(f.stem[1:]) for f in sdir.glob(f"c*.{ext}")} if sdir.is_dir() else set()
     items = []
     for i in idxs:
         if req.start <= i <= end and i not in have:

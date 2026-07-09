@@ -22,6 +22,8 @@ litellm.drop_params = True
 _gpu_sem = asyncio.Semaphore(1)
 # Cloud calls are network-bound — allow a few in flight.
 _cloud_sem = asyncio.Semaphore(4)
+_CLOUD_SLOTS = 4
+_cloud_in_flight = 0  # live gauge for the dashboard
 # Circuit breaker: after a cloud failure, start straight on the fallback until this timestamp.
 _cloud_down_until = 0.0
 
@@ -35,6 +37,8 @@ def cloud_status() -> dict:
     """Dashboard block: today's cloud spend/calls + circuit-breaker state."""
     now = time.time()
     return {
+        "in_flight": _cloud_in_flight,
+        "slots": _CLOUD_SLOTS,
         "today": budget.today(),
         "cap_usd": config.cloud_budget["daily_usd_cap"],
         "over_cap": budget.over_cap(config.cloud_budget["daily_usd_cap"]),
@@ -360,6 +364,9 @@ async def fix_text(
             sem = _cloud_sem if attempt_params["is_cloud"] else _gpu_sem
             try:
                 async with sem:
+                    global _cloud_in_flight
+                    if attempt_params["is_cloud"]:
+                        _cloud_in_flight += 1
                     _t0 = time.time()
                     extra = {"response_format": {"type": "json_object"}} if attempt_cloud_json else {}
                     # reasoning_effort via extra_body so it survives litellm.drop_params for custom
@@ -377,6 +384,8 @@ async def fix_text(
                         **attempt_params["sampling"],
                         **extra,
                     )
+                if attempt_params["is_cloud"]:
+                    _cloud_in_flight -= 1
                 _usage = getattr(resp, "usage", None)
                 pt = getattr(_usage, "prompt_tokens", 0) or 0
                 ct = getattr(_usage, "completion_tokens", 0) or 0
@@ -390,6 +399,7 @@ async def fix_text(
                 break
             except Exception as e:  # noqa: BLE001
                 if attempt_params["is_cloud"]:
+                    _cloud_in_flight -= 1
                     cool = config.cloud_budget["quota_cooldown_s"] if "429" in str(e) \
                         else config.cloud_budget["cooldown_s"]
                     _cloud_down_until = time.time() + cool
