@@ -2,6 +2,7 @@ package com.lagradost.quicknovel.tts
 
 import android.content.Context
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.module.kotlin.readValue
 import com.lagradost.quicknovel.DataStore.mapper
 import com.lagradost.quicknovel.TTSHelper
 import com.lagradost.quicknovel.llm.FixedTextCache
@@ -55,6 +56,27 @@ object CueRenderer {
             f.parentFile?.mkdirs()
             f.writeText(node.toString())
         }.onFailure { logError(it) }
+    }
+
+    /** Make sure a chapter's performance ScriptDoc exists locally, fetching the server-generated
+     *  one when missing (used by the remote sync; the reader has its own fetch path). */
+    fun ensureDoc(
+        ctx: Context, serverUrl: String, bookId: String,
+        llmModel: String, promptVersion: Int, chapterIndex: Int,
+    ): Boolean {
+        val script = com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
+        if (FixedTextCache.loadDoc(ctx, bookId, llmModel, promptVersion, chapterIndex, script) != null) return true
+        if (serverUrl.isBlank()) return false
+        val raw = com.lagradost.quicknovel.llm.CharMapClient
+            .performanceScript(serverUrl, bookId, chapterIndex) ?: return false
+        val paragraphs: List<FixedTextCache.Paragraph> = runCatching {
+            mapper.readValue<List<FixedTextCache.Paragraph>>(raw)
+        }.getOrNull() ?: return false
+        val display = paragraphs.joinToString("\n\n") { p -> p.spans.joinToString(" ") { it.text } }
+        if (display.isBlank()) return false
+        FixedTextCache.saveDoc(ctx, bookId, llmModel, promptVersion, chapterIndex, script, raw)
+        FixedTextCache.save(ctx, bookId, llmModel, promptVersion, chapterIndex, display, script)
+        return true
     }
 
     fun loadMap(ctx: Context, bookId: String): JsonNode? =

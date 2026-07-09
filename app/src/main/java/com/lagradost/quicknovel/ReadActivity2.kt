@@ -582,6 +582,12 @@ class ReadActivity2 : AppCompatActivity(), ColorPickerDialogListener {
         b.ttsPerfLogSwitch.isChecked = viewModel.ttsPerfLog
         b.ttsPerfLogSwitch.setOnCheckedChangeListener { _, on -> viewModel.ttsPerfLog = on }
 
+        b.ttsCastOnlySwitch.isChecked = viewModel.ttsCastOnly
+        b.ttsCastOnlySwitch.setOnCheckedChangeListener { _, on ->
+            viewModel.ttsCastOnly = on
+            (viewModel.ttsSession as? com.lagradost.quicknovel.tts.OnDeviceTtsEngine)?.castOnly = on
+        }
+
         b.ttsCachedButton.setOnClickListener {
             // Per-chapter TTS cache overview for the current book+voice; tap a chapter to jump there.
             viewModel.cachedChapterOverview { items ->

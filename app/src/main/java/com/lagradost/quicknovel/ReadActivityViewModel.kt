@@ -1447,6 +1447,7 @@ class ReadActivityViewModel : ViewModel() {
                     engine.updateDenoise(ttsDenoise)
                     engine.updateVoiceStyle(com.lagradost.quicknovel.tts.AudioPostProcessor.VoiceStyle.fromPref(ttsVoiceStyle))
                     engine.cueResolver = buildCueResolver() // performance-script multi-voice/cues (P5)
+                    engine.castOnly = ttsCastOnly
                     if (ttsPerfLog) com.lagradost.quicknovel.util.PerfMonitor.start(context)
                     engine.onAudibleLine = { current, next ->
                         _ttsLine.postValue(current)
@@ -2297,6 +2298,9 @@ class ReadActivityViewModel : ViewModel() {
 
     /** Log process CPU / screen state during read-aloud (PerfMon tag) — battery diagnostics. */
     var ttsPerfLog by PreferenceDelegate(EPUB_TTS_PERF_LOG, false, Boolean::class)
+
+    /** Strict cast playback: only server-downloaded multi-voice audio; never synthesize locally. */
+    var ttsCastOnly by PreferenceDelegate(EPUB_TTS_CAST_ONLY, false, Boolean::class)
 
     /** Per-line cue resolver for the on-device engine — active only in performance mode. Caches one
      *  aligner per chapter; the ScriptDoc + local charmap copy do the rest. */

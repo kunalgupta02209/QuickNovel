@@ -443,4 +443,5 @@
     <string name="on_device_gen_title">Allow on-device generation</string>
     <string name="on_device_gen_desc">Off = play only cached/synced audio and use only the server for rewrites. Prevents battery drain and heating from on-device synthesis.</string>
     <string name="on_device_gen_disabled">On-device generation is disabled (Settings) — using cached/server results only</string>
+    <string name="tts_cast_only">Server cast audio only (skip anything not downloaded)</string>
 </resources>

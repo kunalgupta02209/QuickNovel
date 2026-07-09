@@ -89,6 +89,8 @@ object TtsAudioCache {
      *  byte-placeable into this cache. Must stay in lockstep with [fileFor]. */
     fun keyFor(line: TTSHelper.TTSLine): String = sha1Hex(line.speakOutMsg).take(24)
 
+    fun keyForText(text: String): String = sha1Hex(text).take(24)
+
     /** Text-keyed variant for cue rendering (P5): the EFFECTIVE synthesized text (e.g. with a
      *  Supertonic <laugh> tag) can differ from the display line, and the voice can be a cast sid. */
     fun fileForText(

@@ -142,6 +142,10 @@ class OnDeviceTtsEngine(
      *  Resolved in the producer (render) so cache keys and synthesis agree. */
     @Volatile var cueResolver: ((TTSHelper.TTSLine) -> CueRenderer.CueDirective?)? = null
 
+    /** STRICT cast playback: only server-downloaded multi-voice audio plays — a line without a cue
+     *  or without its cast WAV on disk is skipped, and nothing is ever synthesized. */
+    @Volatile var castOnly: Boolean = false
+
     private val lock = Object()
     private val queue = ArrayList<Item>()                    // ordered by seq; entries kept for the segment
     private val byLine = HashMap<TTSHelper.TTSLine, Item>()  // identity -> item, for O(1) lookup
@@ -394,6 +398,14 @@ class OnDeviceTtsEngine(
                 synchronized(lock) { item.pcm = cached; lock.notifyAll() }
                 return
             }
+        }
+
+        // Strict cast-only playback: no cue or no downloaded cast WAV -> skip; NEVER synthesize.
+        if (castOnly) {
+            Log.i(TAG, "render SKIP (cast-only: ${if (cue == null) "no cue" else "cast audio not downloaded"})")
+            item.failed = true
+            synchronized(lock) { lock.notifyAll() }
+            return
         }
 
         // Global on-device generation kill-switch: cached playback only — skip uncached lines

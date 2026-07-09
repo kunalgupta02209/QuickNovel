@@ -16,7 +16,7 @@ object RemoteTtsClient {
     private val mapper = DataStore.mapper
 
     data class ServerVoice(val id: String = "", val speakers: Int = 1, val ready: Boolean = false)
-    data class Sentence(val key: String, val text: String)
+    data class Sentence(val key: String, val text: String, val sid: Int? = null, val speed: Float? = null)
     data class ChapterReq(val index: Int, val sentences: List<Sentence>, val name: String = "")
     data class JobDetail(
         val id: String = "",
@@ -69,7 +69,9 @@ object RemoteTtsClient {
                     mapOf(
                         "index" to ch.index,
                         "name" to ch.name,
-                        "sentences" to ch.sentences.map { mapOf("key" to it.key, "text" to it.text) },
+                        "sentences" to ch.sentences.map {
+                            mapOf("key" to it.key, "text" to it.text, "sid" to it.sid, "speed" to it.speed)
+                        },
                     )
                 },
             )

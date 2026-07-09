@@ -206,6 +206,32 @@ object RemoteTtsManager {
         emitProgress(RemoteProgress(key, "building", null, 0, total))
         var lastStatus = "failed" // overwritten on success paths; the finally emits the terminal state
         var doneCount = 0
+        // Cast-aware sync: with the reader in PERFORMANCE mode, ship each line's CAST rendition
+        // (voice sid + effective text) so the SERVER generates the multi-voice audio and the phone
+        // only downloads it — required for cast playback with on-device generation disabled.
+        val scriptMode = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_SCRIPT_MODE, Int::class.javaObjectType
+            )
+        }.getOrNull() ?: -1
+        val perfMode = scriptMode == 2
+        val castingOn = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_CASTING, Boolean::class.javaObjectType
+            )
+        }.getOrNull() != false
+        val llmModel = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_MODEL, String::class.java
+            )
+        }.getOrNull() ?: "qwen2.5-1.5b"
+        val promptV = runCatching {
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.LLM_FIX_PROMPT_VERSION, Int::class.javaObjectType
+            )
+        }.getOrNull() ?: 1
+        if (perfMode) CueRenderer.syncMap(ctx, req.serverUrl, bookIdStr)
+        val keyToSid = HashMap<String, Int>() // cast keys -> the sid dir their WAVs unpack into
         try {
             var sliceStart = req.rangeStart
             while (sliceStart <= req.rangeEnd) {
@@ -217,9 +243,25 @@ object RemoteTtsManager {
                     if (shouldStop(key)) { lastStatus = "stopped"; return }
                     if (TtsAudioCache.isChapterDone(ctx, bookIdStr, def.id, req.sid, index)) { doneCount++; continue }
                     val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes, bookIdStr) ?: continue
-                    val sentences = lines
-                        .filterNot { TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, it).exists() }
-                        .map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
+                    val resolver = if (perfMode) {
+                        CueRenderer.ensureDoc(ctx, req.serverUrl, bookIdStr, llmModel, promptV, index)
+                        CueRenderer.resolverFor(ctx, bookIdStr, def.id, llmModel, promptV, index, castingOn)
+                    } else null
+                    val sentences = lines.mapNotNull { line ->
+                        val cue = resolver?.invoke(line)
+                        if (cue != null) {
+                            val castSid = cue.sid ?: req.sid
+                            if (TtsAudioCache.fileForText(ctx, bookIdStr, def.id, castSid, index, cue.effectiveText).exists()) null
+                            else {
+                                val k = TtsAudioCache.keyForText(cue.effectiveText)
+                                keyToSid[k] = castSid
+                                RemoteTtsClient.Sentence(k, cue.effectiveText, castSid, cue.speed.takeIf { sp -> sp != 1.0f })
+                            }
+                        } else {
+                            if (TtsAudioCache.fileFor(ctx, bookIdStr, def.id, req.sid, line).exists()) null
+                            else RemoteTtsClient.Sentence(TtsAudioCache.keyFor(line), line.speakOutMsg)
+                        }
+                    }
                     // The prepended title line (startChar==endChar==0) doubles as the chapter's display name.
                     val chapterName = lines.firstOrNull()
                         ?.takeIf { it.startChar == 0 && it.endChar == 0 }?.speakOutMsg ?: "Chapter ${index + 1}"
@@ -296,7 +338,7 @@ object RemoteTtsManager {
                     pollFailures = 0
                     for (idx in job.readyChapters) {
                         if (idx in fetched) continue
-                        if (fetchChapter(ctx, req, def, idx)) {
+                        if (fetchChapter(ctx, req, def, idx, keyToSid)) {
                             TtsAudioCache.markChapterDone(ctx, bookIdStr, def.id, req.sid, idx)
                             fetched.add(idx)
                             RemoteTtsNotifications.update(ctx, req, doneCount + fetched.size, total, finished = false)
@@ -324,7 +366,10 @@ object RemoteTtsManager {
     }
 
     /** Download one chapter's ZIP and drop each <key>.wav straight into the cache dir (no re-encode). */
-    private fun fetchChapter(ctx: Context, req: RemoteTtsRequest, def: TtsModels.ModelDef, index: Int): Boolean {
+    private fun fetchChapter(
+        ctx: Context, req: RemoteTtsRequest, def: TtsModels.ModelDef, index: Int,
+        keyToSid: Map<String, Int> = emptyMap(),
+    ): Boolean {
         val bookIdStr = "b${req.bookId}"
         val dir = TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, req.sid, index)
         dir.mkdirs()
@@ -335,8 +380,14 @@ object RemoteTtsManager {
                 while (entry != null) {
                     val name = File(entry.name).name // entry is already "<key>.wav"
                     if (name.endsWith(".wav")) {
-                        val dest = File(dir, name)
-                        val tmp = File(dir, "$name.${Thread.currentThread().id}.${System.nanoTime()}.part")
+                        // Cast sentences live under their CAST sid's dir (playback looks there);
+                        // everything else stays in the job sid's dir as before.
+                        val castSid = keyToSid[name.removeSuffix(".wav")]
+                        val destDir = if (castSid != null && castSid != req.sid)
+                            TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, castSid, index).also { d -> d.mkdirs() }
+                        else dir
+                        val dest = File(destDir, name)
+                        val tmp = File(destDir, "$name.${Thread.currentThread().id}.${System.nanoTime()}.part")
                         tmp.outputStream().use { zip.copyTo(it) }
                         tmp.renameTo(dest)
                     }
