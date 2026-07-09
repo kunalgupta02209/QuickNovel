@@ -32,6 +32,8 @@ object RemoteTtsManager {
         val rangeStart: Int,
         val rangeEnd: Int,
         val serverUrl: String,
+        val textOnly: Boolean = false,   // upload chapter texts only, NO audio generation
+        val forceAudio: Boolean = false, // explicit user action (Edit-with-AI) -> generate audio
     ) {
         val key: String get() = "$bookId|$modelId|$sid"
         val notifId: Int get() = key.hashCode() xor 0x77260000.toInt()
@@ -165,9 +167,20 @@ object RemoteTtsManager {
         }
 
         if (req.serverUrl.isNotBlank() && RemoteTtsClient.reachable(req.serverUrl)) {
-            android.util.Log.i(TAG, "onBookReady -> SERVER queue key=$key url=${req.serverUrl}")
-            com.lagradost.quicknovel.CommonActivity.showToast(com.lagradost.quicknovel.R.string.sent_tts_to_server)
-            com.lagradost.quicknovel.RemoteTtsWorkManager.enqueue(ctx, req) // server-offloaded
+            // Character-voices flow: opening a book must NOT trigger audio generation — only a
+            // text upload (feeds charmaps/scripts). Audio waits for the user's explicit
+            // Edit-with-AI action (forceAudio) — user requirement.
+            val castingOn = runCatching {
+                com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                    com.lagradost.quicknovel.EPUB_TTS_CASTING, Boolean::class.javaObjectType
+                )
+            }.getOrNull() != false
+            val effective = if (castingOn && !req.forceAudio) req.copy(textOnly = true) else req
+            android.util.Log.i(TAG, "onBookReady -> SERVER queue key=$key textOnly=${effective.textOnly}")
+            if (!effective.textOnly) {
+                com.lagradost.quicknovel.CommonActivity.showToast(com.lagradost.quicknovel.R.string.sent_tts_to_server)
+            }
+            com.lagradost.quicknovel.RemoteTtsWorkManager.enqueue(ctx, effective) // server-offloaded
         } else {
             android.util.Log.i(
                 TAG,
@@ -233,6 +246,37 @@ object RemoteTtsManager {
         if (perfMode) CueRenderer.syncMap(ctx, req.serverUrl, bookIdStr)
         val keyToSid = HashMap<String, Int>() // cast keys -> the sid dir their WAVs unpack into
         try {
+            // TEXT-ONLY sync: upload chapters (store_only), no audio job, no polling. Feeds the
+            // server's charmap/script pipeline; audio comes later from an explicit user action.
+            if (req.textOnly) {
+                var sliceStart0 = req.rangeStart
+                while (sliceStart0 <= req.rangeEnd) {
+                    if (shouldStop(key)) { lastStatus = "stopped"; return }
+                    val sliceEnd0 = minOf(sliceStart0 + SLICE_CHAPTERS - 1, req.rangeEnd)
+                    val chapters = ArrayList<RemoteTtsClient.ChapterReq>()
+                    for (index in sliceStart0..sliceEnd0) {
+                        val lines = TtsChapterLines.build(ctx, req.apiName, req.author, req.name, index, authorNotes, bookIdStr) ?: continue
+                        val sentences = lines.map { RemoteTtsClient.Sentence(TtsAudioCache.keyFor(it), it.speakOutMsg) }
+                        val chapterName = lines.firstOrNull()
+                            ?.takeIf { it.startChar == 0 && it.endChar == 0 }?.speakOutMsg ?: "Chapter ${index + 1}"
+                        if (sentences.isNotEmpty()) chapters.add(RemoteTtsClient.ChapterReq(index, sentences, chapterName))
+                    }
+                    if (chapters.isNotEmpty()) {
+                        val (devId, devName) = com.lagradost.quicknovel.telemetry.TelemetryManager.deviceIdentity(ctx)
+                        RemoteTtsClient.submitBatch(
+                            req.serverUrl, bookIdStr, def.id, req.sid, req.sampleRate, chapters,
+                            bookName = req.name, deviceId = devId, deviceName = devName,
+                            apiName = req.apiName, author = req.author ?: "", storeOnly = true,
+                        ) ?: return
+                    }
+                    doneCount = minOf(sliceEnd0 - req.rangeStart + 1, total)
+                    emitProgress(RemoteProgress(key, "storing", null, doneCount, total))
+                    sliceStart0 = sliceEnd0 + 1
+                }
+                lastStatus = "done"
+                android.util.Log.i(TAG, "text-only sync complete key=$key ($total chapters)")
+                return
+            }
             var sliceStart = req.rangeStart
             while (sliceStart <= req.rangeEnd) {
                 val sliceEnd = minOf(sliceStart + SLICE_CHAPTERS - 1, req.rangeEnd)

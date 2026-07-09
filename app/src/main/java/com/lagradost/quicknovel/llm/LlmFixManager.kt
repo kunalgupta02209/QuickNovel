@@ -230,12 +230,43 @@ object LlmFixManager {
                 }
             }
             when (job.status) {
-                "done" -> return DownloadState.IsDone to total
+                "done" -> {
+                    // The user's Edit-with-AI action is THE trigger for performance audio: once the
+                    // performance script lands, kick the cast-audio sync (forceAudio bypasses the
+                    // casting text-only gate). The server auto-chain has usually pre-generated the
+                    // WAVs by now, so this sync is mostly download.
+                    if (req.scriptType == ScriptType.PERFORMANCE) {
+                        runCatching { triggerCastAudioSync(ctx, req) }
+                    }
+                    return DownloadState.IsDone to total
+                }
                 "error" -> return DownloadState.IsFailed to (alreadyFixed + fetched.size)
                 "cancelled" -> return DownloadState.IsStopped to (alreadyFixed + fetched.size)
                 else -> delay(2000)
             }
         }
+    }
+
+    /** After a performance-script fix completes: start the cast-audio sync for the same range. */
+    private fun triggerCastAudioSync(ctx: Context, req: FixRequest) {
+        val def = com.lagradost.quicknovel.tts.TtsModels.byId(
+            com.lagradost.quicknovel.BaseApplication.getKeyClass(
+                com.lagradost.quicknovel.EPUB_TTS_OD_MODEL, String::class.java
+            ) ?: "kitten"
+        )
+        val voice = com.lagradost.quicknovel.BaseApplication.getKeyClass(
+            com.lagradost.quicknovel.EPUB_TTS_OD_VOICE, String::class.java
+        )
+        val sid = com.lagradost.quicknovel.tts.TtsModels.parseVoice(voice)?.second ?: 0
+        com.lagradost.quicknovel.tts.RemoteTtsManager.onBookReady(
+            ctx,
+            com.lagradost.quicknovel.tts.RemoteTtsManager.RemoteTtsRequest(
+                bookId = req.bookId, apiName = req.apiName, author = req.author, name = req.name,
+                posterUrl = req.posterUrl, modelId = def.id, sid = sid, sampleRate = def.sampleRate,
+                rangeStart = req.rangeStart, rangeEnd = req.rangeEnd,
+                serverUrl = req.serverUrl, forceAudio = true,
+            ),
+        )
     }
 
     private fun readRawChapter(ctx: Context, req: FixRequest, index: Int, authorNotes: Boolean): String? {

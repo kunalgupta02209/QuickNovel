@@ -128,6 +128,16 @@ class Job:
                 return
             self.status = "done"
             log.info("job %s done", self.id)
+            # scripts -> audio auto-chain: a finished performance-script job queues the book's CAST
+            # audio (idempotent — existing WAVs skip instantly), unless disabled in config.
+            if self.script_type == "performance" and self.book_id:
+                try:
+                    from . import tts_generate as _gen
+                    if _gen.auto_cast_audio_enabled():
+                        out = _gen.generate(self.book_id, use_script=True)
+                        log.info("auto-chained cast audio for %s: %s", self.book_id, out)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("cast-audio auto-chain skipped for %s: %s", self.book_id, str(e)[:120])
         except asyncio.CancelledError:
             self.status = "cancelled"
             raise

@@ -199,6 +199,7 @@ class TtsBatchReq(BaseModel):
     sample_rate: int = 24000
     device_id: str = ""    # submitting device (dashboard attribution; cancel decisions stay informed)
     device_name: str = ""
+    store_only: bool = False  # upload chapter texts only — NO audio job (casting-gated app flow)
     items: list[TtsChapter]
 
 
@@ -236,6 +237,10 @@ async def tts_batch(req: TtsBatchReq):
         charmap_jobs.maybe_auto_build(req.book_id)
     except Exception:  # noqa: BLE001
         log.exception("chapter_texts/charmap hook failed")
+    if req.store_only:
+        # Text-only sync: the app uploads chapters without triggering ANY audio generation
+        # (character-voices flow: audio waits for the user's explicit Edit-with-AI action).
+        return {"job_id": None, "stored": len(items)}
     job = tts_jobs.submit(
         req.book_id, req.model_id, req.sid, req.sample_rate,
         items, config.tts_num_threads, req.book_name,
@@ -467,49 +472,14 @@ class TtsGenReq(BaseModel):
 
 
 @app.post("/tts/generate")
-async def tts_generate(req: TtsGenReq):
-    """Server-side TTS generation from stored chapter texts — no device needed. Stored text is
-    line-per-sentence exactly as the app submitted it, so sha1(line) reproduces the app's cache
-    keys: devices later pull this audio as instant cache hits."""
-    import hashlib
-    idxs = chapter_texts.chapter_indices(req.book_id)
-    if not idxs:
-        raise HTTPException(404, "no stored chapters for this book")
-    end = req.end if req.end >= 0 else max(idxs)
-    meta = chapter_texts.meta(req.book_id)
-    items = []
-    skipped_no_script = 0
-    for i in idxs:
-        if not (req.start <= i <= end):
-            continue
-        text = chapter_texts.get_text(req.book_id, i) or ""
-        lines = [ln for ln in text.splitlines() if ln.strip()]
-        if req.use_script:
-            cast = casting.cast_lines(req.book_id, req.model_id, i, lines)
-            if cast is None:  # no performance ScriptDoc for this chapter (yet) -> skip, not fake
-                skipped_no_script += 1
-                continue
-            sentences = [
-                {"key": hashlib.sha1(c["text"].encode("utf-8")).hexdigest()[:24],
-                 "text": c["text"], "sid": c["sid"], "speed": c["speed"]}
-                for c in cast
-            ]
-        else:
-            sentences = [
-                {"key": hashlib.sha1(ln.encode("utf-8")).hexdigest()[:24], "text": ln}
-                for ln in lines
-            ]
-        if sentences:
-            items.append({"index": i, "name": (meta.get("chapters") or {}).get(str(i), ""),
-                          "sentences": sentences})
-    if not items:
-        raise HTTPException(400, f"no synthesizable sentences in range (skipped {skipped_no_script} script-less chapters)")
-    job = tts_jobs.submit(
-        req.book_id, req.model_id, req.sid, 24000, items, config.tts_num_threads,
-        meta.get("book_name") or req.book_id, "dashboard", "web dashboard",
-    )
-    return {"job_id": job.id, "chapters": len(items),
-            "cast": req.use_script, "skipped_no_script": skipped_no_script}
+async def tts_generate_ep(req: TtsGenReq):
+    """Server-side TTS generation from stored chapter texts — no device needed. use_script=True
+    casts per-line character voices from the performance ScriptDocs + charmap."""
+    from . import tts_generate as gen
+    try:
+        return gen.generate(req.book_id, req.model_id, req.sid, req.start, req.end, req.use_script)
+    except ValueError as e:
+        raise HTTPException(400 if "no synthesizable" in str(e) else 404, str(e))
 
 
 # ---- book sync between devices (server-held chapter texts) ----

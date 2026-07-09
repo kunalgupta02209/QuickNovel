@@ -52,7 +52,7 @@ object RemoteTtsClient {
         baseUrl: String, bookId: String, modelId: String, sid: Int, sampleRate: Int,
         chapters: List<ChapterReq>, bookName: String = "",
         deviceId: String = "", deviceName: String = "",
-        apiName: String = "", author: String = "",
+        apiName: String = "", author: String = "", storeOnly: Boolean = false,
     ): String? {
         val body = mapper.writeValueAsString(
             mapOf(
@@ -63,6 +63,7 @@ object RemoteTtsClient {
                 "model_id" to modelId,
                 "sid" to sid,
                 "sample_rate" to sampleRate,
+                "store_only" to storeOnly,
                 "device_id" to deviceId,
                 "device_name" to deviceName,
                 "items" to chapters.map { ch ->
