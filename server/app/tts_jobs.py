@@ -104,17 +104,17 @@ class TtsJob:
                     if self._cancel:
                         return
                     key = sent["key"]
-                    # P5 casting: a sentence may carry its own voice/pace; storage stays under the
-                    # JOB's sid dir (the app's pull path), keyed by content hash of the text.
+                    # P5 casting: a sentence may carry its own voice/pace; its WAV lives under the
+                    # CAST voice's dir (the app pulls per-sid chapter ZIPs), keyed by text hash.
                     s_sid = sent.get("sid") if sent.get("sid") is not None else self.sid
                     s_speed = float(sent.get("speed") or 1.0)
-                    if not tts_storage.exists(self.book_id, self.model_id, self.sid, index, key):
+                    if not tts_storage.exists(self.book_id, self.model_id, s_sid, index, key):
                         async with _semaphore():
                             if self._cancel:
                                 return
                             # re-check under the semaphore: a concurrent/duplicate job may have
                             # synthesized this sentence while we queued (review CACHE-001)
-                            if tts_storage.exists(self.book_id, self.model_id, self.sid, index, key):
+                            if tts_storage.exists(self.book_id, self.model_id, s_sid, index, key):
                                 self.progress += 1
                                 self.chapters[index]["done"] += 1
                                 return
@@ -127,7 +127,7 @@ class TtsJob:
                                 metrics.record_tts_sentence(time.time() - _t0, len(sent.get("text") or ""))
                             finally:
                                 _in_flight -= 1
-                        tts_storage.write(self.book_id, self.model_id, self.sid, index, key, wav)
+                        tts_storage.write(self.book_id, self.model_id, s_sid, index, key, wav)
                         self.synthesized += 1
                     self.progress += 1
                     self.chapters[index]["done"] += 1

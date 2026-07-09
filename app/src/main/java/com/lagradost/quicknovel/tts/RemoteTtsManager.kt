@@ -371,33 +371,35 @@ object RemoteTtsManager {
         keyToSid: Map<String, Int> = emptyMap(),
     ): Boolean {
         val bookIdStr = "b${req.bookId}"
-        val dir = TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, req.sid, index)
-        dir.mkdirs()
-        val stream = RemoteTtsClient.openChapterZip(req.serverUrl, bookIdStr, def.id, req.sid, index) ?: return false
-        return try {
-            ZipInputStream(stream.buffered()).use { zip ->
-                var entry = zip.nextEntry
-                while (entry != null) {
-                    val name = File(entry.name).name // entry is already "<key>.wav"
-                    if (name.endsWith(".wav")) {
-                        // Cast sentences live under their CAST sid's dir (playback looks there);
-                        // everything else stays in the job sid's dir as before.
-                        val castSid = keyToSid[name.removeSuffix(".wav")]
-                        val destDir = if (castSid != null && castSid != req.sid)
-                            TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, castSid, index).also { d -> d.mkdirs() }
-                        else dir
-                        val dest = File(destDir, name)
-                        val tmp = File(destDir, "$name.${Thread.currentThread().id}.${System.nanoTime()}.part")
-                        tmp.outputStream().use { zip.copyTo(it) }
-                        tmp.renameTo(dest)
+        // Cast sentences live under their CAST voice's dir on BOTH sides now — pull the job sid's
+        // chapter ZIP plus one ZIP per distinct cast sid, each unpacking straight into its own dir.
+        val sids = (keyToSid.values.toSet() + req.sid)
+        var any = false
+        for (sid in sids) {
+            val dir = TtsAudioCache.chapterDir(ctx, bookIdStr, def.id, sid, index)
+            dir.mkdirs()
+            val stream = RemoteTtsClient.openChapterZip(req.serverUrl, bookIdStr, def.id, sid, index)
+                ?: continue // a sid with no audio for this chapter is fine
+            try {
+                ZipInputStream(stream.buffered()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        val name = File(entry.name).name // entry is already "<key>.wav"
+                        if (name.endsWith(".wav")) {
+                            val dest = File(dir, name)
+                            val tmp = File(dir, "$name.${Thread.currentThread().id}.${System.nanoTime()}.part")
+                            tmp.outputStream().use { zip.copyTo(it) }
+                            tmp.renameTo(dest)
+                        }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
                     }
-                    zip.closeEntry()
-                    entry = zip.nextEntry
                 }
+                any = true
+            } catch (t: Throwable) {
+                logError(t)
             }
-            true
-        } catch (t: Throwable) {
-            logError(t); false
         }
+        return any
     }
 }

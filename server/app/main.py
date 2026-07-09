@@ -463,6 +463,7 @@ class TtsGenReq(BaseModel):
     sid: int = 0
     start: int = 0
     end: int = -1
+    use_script: bool = False  # performance-script CAST audio (per-line voices from the charmap)
 
 
 @app.post("/tts/generate")
@@ -477,24 +478,38 @@ async def tts_generate(req: TtsGenReq):
     end = req.end if req.end >= 0 else max(idxs)
     meta = chapter_texts.meta(req.book_id)
     items = []
+    skipped_no_script = 0
     for i in idxs:
         if not (req.start <= i <= end):
             continue
         text = chapter_texts.get_text(req.book_id, i) or ""
-        sentences = [
-            {"key": hashlib.sha1(ln.encode("utf-8")).hexdigest()[:24], "text": ln}
-            for ln in text.splitlines() if ln.strip()
-        ]
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if req.use_script:
+            cast = casting.cast_lines(req.book_id, req.model_id, i, lines)
+            if cast is None:  # no performance ScriptDoc for this chapter (yet) -> skip, not fake
+                skipped_no_script += 1
+                continue
+            sentences = [
+                {"key": hashlib.sha1(c["text"].encode("utf-8")).hexdigest()[:24],
+                 "text": c["text"], "sid": c["sid"], "speed": c["speed"]}
+                for c in cast
+            ]
+        else:
+            sentences = [
+                {"key": hashlib.sha1(ln.encode("utf-8")).hexdigest()[:24], "text": ln}
+                for ln in lines
+            ]
         if sentences:
             items.append({"index": i, "name": (meta.get("chapters") or {}).get(str(i), ""),
                           "sentences": sentences})
     if not items:
-        raise HTTPException(400, "no synthesizable sentences in range")
+        raise HTTPException(400, f"no synthesizable sentences in range (skipped {skipped_no_script} script-less chapters)")
     job = tts_jobs.submit(
         req.book_id, req.model_id, req.sid, 24000, items, config.tts_num_threads,
         meta.get("book_name") or req.book_id, "dashboard", "web dashboard",
     )
-    return {"job_id": job.id, "chapters": len(items)}
+    return {"job_id": job.id, "chapters": len(items),
+            "cast": req.use_script, "skipped_no_script": skipped_no_script}
 
 
 # ---- book sync between devices (server-held chapter texts) ----
