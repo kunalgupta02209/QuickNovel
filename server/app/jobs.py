@@ -87,6 +87,15 @@ class Job:
                     pause_event=self._pause,
                 )
                 self.results[str(it["id"])] = res["fixed"]
+                # grammar results persist as plain text so devices can fetch server-generated fixes
+                if self.book_id and self.script_type == "grammar" and res["fixed"]:
+                    try:
+                        from pathlib import Path
+                        d = Path("data/scripts") / self.book_id / "grammar"
+                        d.mkdir(parents=True, exist_ok=True)
+                        (d / f"c{it['id']}.txt").write_text(res["fixed"], encoding="utf-8")
+                    except Exception:  # noqa: BLE001
+                        pass
                 if res.get("paragraphs") is not None:
                     self.paragraphs[str(it["id"])] = res["paragraphs"]
                     # server-side ScriptDoc copy (future /scripts sync + debugging)

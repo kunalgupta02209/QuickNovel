@@ -2304,20 +2304,23 @@ class ReadActivityViewModel : ViewModel() {
         if (llmScriptMode != 2) return null
         val ctx = context ?: return null
         val bookId = llmBookId() ?: return null
-        // refresh the cached map copy in the background (cast edits on the dashboard flow in)
+        val perChapter = HashMap<Int, ((TTSHelper.TTSLine) -> com.lagradost.quicknovel.tts.CueRenderer.CueDirective?)>()
+        // Refresh the cached map copy in the background (cast edits on the dashboard flow in). When
+        // it lands, drop built resolvers so chapters resolved before the map arrived gain casting.
         if (llmServerUrl.isNotBlank()) ioSafe {
             com.lagradost.quicknovel.tts.CueRenderer.syncMap(ctx, llmServerUrl, bookId)
+            synchronized(perChapter) { perChapter.clear() }
         }
-        val perChapter = HashMap<Int, ((TTSHelper.TTSLine) -> com.lagradost.quicknovel.tts.CueRenderer.CueDirective?)?>()
         return fun(line: TTSHelper.TTSLine): com.lagradost.quicknovel.tts.CueRenderer.CueDirective? {
-            val resolver = synchronized(perChapter) {
-                perChapter.getOrPut(line.index) {
-                    com.lagradost.quicknovel.tts.CueRenderer.resolverFor(
-                        ctx, bookId, ttsOnDeviceModel, llmModel, llmPromptVersion,
-                        line.index, ttsCastingEnabled,
-                    )
+            val resolver = synchronized(perChapter) { perChapter[line.index] }
+                ?: com.lagradost.quicknovel.tts.CueRenderer.resolverFor(
+                    ctx, bookId, ttsOnDeviceModel, llmModel, llmPromptVersion,
+                    line.index, ttsCastingEnabled,
+                )?.also { r ->
+                    // Cache HITS only: a missing ScriptDoc (fetch still in flight) must retry on the
+                    // next line, not poison the chapter for the whole session.
+                    synchronized(perChapter) { perChapter[line.index] = r }
                 }
-            }
             return resolver?.invoke(line)
         }
     }

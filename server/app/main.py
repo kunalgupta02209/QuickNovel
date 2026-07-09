@@ -404,6 +404,7 @@ def charmap_recast(book_id: str, cast_model: str = "kokoro"):
 # ---- server-side generation from stored chapters (dashboard book management) ----
 class ScriptsGenReq(BaseModel):
     book_id: str
+    script_type: str = "performance"  # performance | grammar
     start: int = 0
     end: int = -1  # -1 = all stored chapters
     model: str | None = None
@@ -429,8 +430,8 @@ async def scripts_generate(req: ScriptsGenReq):
                 items.append({"id": str(i), "text": text})
     if not items:
         return {"job_id": None, "skipped": "all requested chapters already have scripts"}
-    job = jobs.submit(req.model, items, "performance", req.book_id)
-    return {"job_id": job.id, "chapters": len(items)}
+    job = jobs.submit(req.model, items, req.script_type, req.book_id)
+    return {"job_id": job.id, "chapters": len(items), "script_type": req.script_type}
 
 
 @app.get("/scripts/{book_id}")
@@ -446,6 +447,14 @@ def scripts_get(book_id: str, index: int):
     if not f.exists():
         raise HTTPException(404, "no script for this chapter")
     return Response(content=f.read_bytes(), media_type="application/json")
+
+
+@app.get("/scripts/{book_id}/grammar/c{index}.txt")
+def scripts_get_grammar(book_id: str, index: int):
+    f = charmap.ROOT.parent / "scripts" / book_id / "grammar" / f"c{index}.txt"
+    if not f.exists():
+        raise HTTPException(404, "no grammar fix for this chapter")
+    return Response(content=f.read_bytes(), media_type="text/plain; charset=utf-8")
 
 
 class TtsGenReq(BaseModel):
