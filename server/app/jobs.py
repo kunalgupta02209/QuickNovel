@@ -93,7 +93,10 @@ class Job:
                         from pathlib import Path
                         d = Path("data/scripts") / self.book_id / "grammar"
                         d.mkdir(parents=True, exist_ok=True)
-                        (d / f"c{it['id']}.txt").write_text(res["fixed"], encoding="utf-8")
+                        tmp = d / f"c{it['id']}.txt.part"
+                        tmp.write_text(res["fixed"], encoding="utf-8")
+                        import os as _os
+                        _os.replace(tmp, d / f"c{it['id']}.txt")  # atomic: clients fetch these
                     except Exception:  # noqa: BLE001
                         pass
                 if res.get("paragraphs") is not None:
@@ -105,8 +108,11 @@ class Job:
                             import json as _json
                             d = Path("data/scripts") / self.book_id / self.script_type
                             d.mkdir(parents=True, exist_ok=True)
-                            (d / f"c{it['id']}.json").write_text(
+                            tmp = d / f"c{it['id']}.json.part"
+                            tmp.write_text(
                                 _json.dumps(res["paragraphs"], ensure_ascii=False), encoding="utf-8")
+                            import os as _os
+                            _os.replace(tmp, d / f"c{it['id']}.json")  # atomic: clients fetch these
                         except Exception:  # noqa: BLE001
                             pass
                 self.chars_out += len(res["fixed"])
@@ -154,9 +160,18 @@ class Job:
             self.status = "running"
 
     def summary(self) -> dict:
+        book_name = ""
+        if self.book_id:
+            try:
+                from . import chapter_texts
+                book_name = chapter_texts.meta(self.book_id).get("book_name") or ""
+            except Exception:  # noqa: BLE001
+                pass
         return {
             "id": self.id,
             "model": self.model,
+            "book_id": self.book_id,
+            "book_name": book_name,
             "script_type": self.script_type,
             "status": self.status,
             "progress": self.progress,

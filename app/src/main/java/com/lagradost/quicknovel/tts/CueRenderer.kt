@@ -54,7 +54,10 @@ object CueRenderer {
             val node = com.lagradost.quicknovel.llm.CharMapClient.map(serverUrl, bookId) ?: return
             val f = castFile(ctx, bookId)
             f.parentFile?.mkdirs()
-            f.writeText(node.toString())
+            // atomic write: loadMap() may run concurrently on the audio thread (review R002)
+            val tmp = File(f.parentFile, f.name + ".${System.nanoTime()}.part")
+            tmp.writeText(node.toString())
+            tmp.renameTo(f)
         }.onFailure { logError(it) }
     }
 
@@ -74,8 +77,11 @@ object CueRenderer {
         }.getOrNull() ?: return false
         val display = paragraphs.joinToString("\n\n") { p -> p.spans.joinToString(" ") { it.text } }
         if (display.isBlank()) return false
-        FixedTextCache.saveDoc(ctx, bookId, llmModel, promptVersion, chapterIndex, script, raw)
-        FixedTextCache.save(ctx, bookId, llmModel, promptVersion, chapterIndex, display, script)
+        if (!FixedTextCache.saveDoc(ctx, bookId, llmModel, promptVersion, chapterIndex, script, raw)) return false
+        if (!FixedTextCache.save(ctx, bookId, llmModel, promptVersion, chapterIndex, display, script)) {
+            FixedTextCache.deleteChapter(ctx, bookId, llmModel, promptVersion, chapterIndex, script)
+            return false
+        }
         return true
     }
 

@@ -1559,7 +1559,6 @@ class ReadActivityViewModel : ViewModel() {
     }
 
     suspend fun startTTSThread() = coroutineScope {
-        val ttsSession = ttsSession ?: return@coroutineScope
         try {
             val ttsStartTime = System.currentTimeMillis()
             var ttsEndTime = ttsStartTime + ttsTimer
@@ -1568,8 +1567,15 @@ class ReadActivityViewModel : ViewModel() {
             // A pending live voice-change resume wins over the scroll anchor (consumed once).
             val dIndex = ttsResumeAt?.also { ttsResumeAt = null } ?: desiredTTSIndex ?: desiredIndex ?: return@coroutineScope
 
-            if (ttsThreadMutex.isLocked) return@coroutineScope
-            ttsThreadMutex.withLock {
+            // WAIT briefly for a previous driver to exit instead of insta-bailing: after a live
+            // voice change, recreateTtsEngine's restart used to race the old driver's lock and get
+            // swallowed -> dead TTS (edge-case review R009). The old driver exits promptly on
+            // stopTTS, so this resolves in ms; the timeout only guards a truly wedged driver.
+            val acquired = kotlinx.coroutines.withTimeoutOrNull(4000) { ttsThreadMutex.lock(); true } ?: return@coroutineScope
+            try {
+                // Bind the CURRENT engine AFTER acquiring the lock — an engine swapped mid-wait
+                // would otherwise leave this driver speaking into a released instance.
+                val ttsSession = this@ReadActivityViewModel.ttsSession ?: return@coroutineScope
                 ttsSession.register()
                 ttsSession.setSpeed(ttsSpeed)
                 ttsSession.setPitch(ttsPitch)
@@ -1766,6 +1772,8 @@ class ReadActivityViewModel : ViewModel() {
                         ttsInnerIndex = 0
                     }
                 }
+            } finally {
+                ttsThreadMutex.unlock()
             }
         } catch (_: TimeoutCancellationException) {
 
@@ -1774,8 +1782,9 @@ class ReadActivityViewModel : ViewModel() {
         } finally {
             currentTTSStatus = TTSHelper.TTSStatus.IsStopped
             TTSNotifications.notify(TTSHelper.TTSStatus.IsStopped, context)
-            ttsSession.interruptTTS()
-            ttsSession.unregister()
+            val session = this@ReadActivityViewModel.ttsSession
+            session?.interruptTTS()
+            session?.unregister()
             _ttsLine.postValue(null)
             _ttsPending.postValue(false)
             ttsTimeRemaining.postValue(null)
@@ -2213,7 +2222,9 @@ class ReadActivityViewModel : ViewModel() {
     private fun maybeFetchServerScript(ctx: Context, bookId: String, index: Int): String? {
         if (llmServerUrl.isBlank()) return null
         synchronized(scriptFetchAttempted) {
-            if (!scriptFetchAttempted.add("$bookId|$index")) return null
+            // key includes model+promptVersion: a model/prompt switch must be allowed to refetch
+            // (the cache dirs are keyed the same way) — review R003
+            if (!scriptFetchAttempted.add("$bookId|$index|$llmModel|$llmPromptVersion")) return null
         }
         val raw = com.lagradost.quicknovel.llm.CharMapClient
             .performanceScript(llmServerUrl, bookId, index) ?: return null
@@ -2223,8 +2234,13 @@ class ReadActivityViewModel : ViewModel() {
         val display = paragraphs.joinToString("\n\n") { p -> p.spans.joinToString(" ") { it.text } }
             .trim().ifBlank { return null }
         val script = com.lagradost.quicknovel.llm.ScriptType.PERFORMANCE
-        com.lagradost.quicknovel.llm.FixedTextCache.saveDoc(ctx, bookId, llmModel, llmPromptVersion, index, script, raw)
-        com.lagradost.quicknovel.llm.FixedTextCache.save(ctx, bookId, llmModel, llmPromptVersion, index, display, script)
+        // transactional pair: a doc without its display text (or vice versa) desyncs TTS keys from
+        // the rendered text (review RACE-001) — roll back the first write if the second fails
+        if (!com.lagradost.quicknovel.llm.FixedTextCache.saveDoc(ctx, bookId, llmModel, llmPromptVersion, index, script, raw)) return null
+        if (!com.lagradost.quicknovel.llm.FixedTextCache.save(ctx, bookId, llmModel, llmPromptVersion, index, display, script)) {
+            com.lagradost.quicknovel.llm.FixedTextCache.deleteChapter(ctx, bookId, llmModel, llmPromptVersion, index, script)
+            return null
+        }
         return display
     }
 

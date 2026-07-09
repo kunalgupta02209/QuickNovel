@@ -89,9 +89,9 @@ function jobRow(j, kindPath) {
   let extra = j.current_chunk ? ` · ${esc(j.current_chunk)}` : '';
   if (j.current) extra += ` · now: ch ${j.current.index + 1}${j.current.name ? ' — ' + esc(j.current.name) : ''}`;
   const dev = j.device_name ? ` · ${esc(j.device_name)}` : '';
-  const label = j.book_id
+  const label = j.model_id !== undefined
     ? `${esc(j.book_name || j.book_id)} · ${esc(j.model_id)}/s${j.sid}${dev}`
-    : esc(j.model || '') + script;
+    : `${esc(j.book_name || '')}${j.book_name ? ' · ' : ''}${esc(j.model || '')}${script}`;
   let chips = '';
   if (j.chapters && j.chapters.length && j.status === 'running') {
     chips = '<div class="chips">' + j.chapters.map(c =>

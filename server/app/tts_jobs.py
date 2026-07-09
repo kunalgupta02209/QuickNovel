@@ -111,6 +111,12 @@ class TtsJob:
                         async with _semaphore():
                             if self._cancel:
                                 return
+                            # re-check under the semaphore: a concurrent/duplicate job may have
+                            # synthesized this sentence while we queued (review CACHE-001)
+                            if tts_storage.exists(self.book_id, self.model_id, self.sid, index, key):
+                                self.progress += 1
+                                self.chapters[index]["done"] += 1
+                                return
                             _in_flight += 1
                             try:
                                 _t0 = time.time()
